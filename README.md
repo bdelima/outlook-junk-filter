@@ -164,6 +164,7 @@ reason are stored in the log (`ai_score`, `ai_reason`, shown on the message page
   used. A message that tells the model to rate it 0 can at worst earn no points.
 - **Failure is harmless:** if the server is unreachable or answers with an error, the message gets no AI points, and the job stops
   asking until the next run (it logs one warning). An unreadable reply costs only that message.
+- **At startup** the job checks the address and asks the server for its model list, and logs one line: `AI scoring server ...: model ... is available`, or an `ERROR` if the address is malformed or the server does not answer. A malformed `OJF_AI_URL` (for example `host::8000`) is reported as an error and AI scoring stays off.
 - **Each run logs** `AI rated N of M scored messages (score range ... ), K failed`.
 - **Speed:** about 7 seconds per message on an Intel Meteor Lake NPU, one at a time. The score range keeps that to the ambiguous middle.
 

@@ -45,6 +45,20 @@ def _get(env, name: str) -> str | None:
     return value or None
 
 
+def _valid_http_url(raw: str) -> bool:
+    """An http(s) address with a host and, if given, a numeric port (catches typos such as host::8000)."""
+    if re.search(r"\s", raw):
+        return False
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    try:
+        _ = parts.port  # raises ValueError for a port that is not a number in range
+    except ValueError:
+        return False
+    return True
+
+
 def _threshold(env, name: str):
     """Returns (value, problem). A missing threshold has no problem here; callers decide."""
     raw = _get(env, name)
@@ -238,11 +252,11 @@ def load(env=None) -> Config:
     raw = _get(env, "OJF_AI_URL")
     if raw is not None:
         parts = urlsplit(raw)
-        if parts.scheme in ("http", "https") and parts.netloc:
+        if _valid_http_url(raw):
             # a bare host:port means OpenVINO Model Server's OpenAI-style API, served under /v3
             ai_url = raw.rstrip("/") if parts.path.strip("/") else raw.rstrip("/") + "/v3"
         else:
-            problems.append(f"OJF_AI_URL={raw!r} is not an http:// or https:// address; AI scoring is off")
+            problems.append(f"OJF_AI_URL={raw!r} is not a valid http:// or https:// address with a host and an optional numeric port, like http://host:8000; AI scoring is off")
     ai_model = _get(env, "OJF_AI_MODEL") or DEFAULT_AI_MODEL
     ai_max_points, ai_min_score, ai_max_score, ai_timeout = DEFAULT_AI_POINTS, 0.0, None, DEFAULT_AI_TIMEOUT
     value, problem = _threshold(env, "OJF_AI_MAX_POINTS")
