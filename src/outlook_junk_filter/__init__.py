@@ -1,4 +1,4 @@
-"""outlook-junk-filter: scores the Junk folder of two personal Microsoft accounts."""
+"""outlook-junk-filter: scores the Junk folder of one personal Microsoft mailbox."""
 
 import os
 

@@ -27,7 +27,7 @@ class GraphError(Exception):
 
 
 class NetworkError(Exception):
-    """The network failed; the account is skipped for this run."""
+    """The network failed; the run is skipped."""
 
 
 class DeltaGone(Exception):

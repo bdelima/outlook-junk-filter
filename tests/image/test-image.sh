@@ -88,7 +88,7 @@ if [ "${nspam:-0}" -ge 1 ] 2>/dev/null; then ok "sa-learn teaches Bayes ($nspam 
 # 8. the review page starts as uid 1000 on a read-only root filesystem and serves the Decisions page from a fixture log;
 #    a hostile subject comes back escaped, and the page sends a Content-Security-Policy
 cat > "$state_ui/logs/decisions.jsonl" <<'JSON'
-{"ts":"2026-11-06T10:00:00Z","account":"live","message_id":"M1","internet_message_id":"<1@x.invalid>","received":"2026-11-06T09:00:00Z","from_addr":"evil@phish.invalid","subject":"<script>alert(1)</script>","score":12.5,"rules":["A","B"],"keep_rule_hit":false,"relays_untrusted":"","first_untrusted_ip":"","auth_results_present":true,"mode":"report-only","decision":"would-delete","reason":"score at or above the delete threshold (report-only)","action_error":"","current_message_id":"M1","folder":"junkemail"}
+{"ts":"2026-11-06T10:00:00Z","message_id":"M1","internet_message_id":"<1@x.invalid>","received":"2026-11-06T09:00:00Z","from_addr":"evil@phish.invalid","subject":"<script>alert(1)</script>","score":12.5,"rules":["A","B"],"keep_rule_hit":false,"relays_untrusted":"","first_untrusted_ip":"","auth_results_present":true,"mode":"report-only","decision":"would-delete","reason":"score at or above the delete threshold (report-only)","action_error":"","current_message_id":"M1","folder":"junkemail"}
 JSON
 chmod 666 "$state_ui/logs/decisions.jsonl"
 docker run -d --name "$ui_name" --read-only --user 1000:1000 -p 127.0.0.1:60888:60888 -v "$state_ui:/state"   --entrypoint python "$IMAGE" -m outlook_junk_filter.ui >/dev/null

@@ -1,4 +1,4 @@
-"""One run for one account: walk the Junk delta, score, decide, act or only record.
+"""One run for the mailbox: walk the Junk delta, score, decide, act or only record.
 
 Decision order: allowlist, scoring failure, delete threshold, quarantine threshold, keep.
 After the Junk pass, quarantined messages past the retention period are deleted.
@@ -24,9 +24,8 @@ def _from_addr(message: dict) -> str:
     return ((message.get("from") or {}).get("emailAddress") or {}).get("address") or ""
 
 
-class AccountRunner:
-    def __init__(self, account, cfg, graph, state, decisions, log, score_fn, touch=lambda: None, now=None, restored=None):
-        self.account = account
+class Runner:
+    def __init__(self, cfg, graph, state, decisions, log, score_fn, touch=lambda: None, now=None, restored=None):
         self.cfg = cfg
         self.graph = graph
         self.state = state
@@ -60,7 +59,6 @@ class AccountRunner:
         self.decisions.write(
             {
                 "ts": self.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "account": self.account,
                 "message_id": message["id"],
                 "internet_message_id": message.get("internetMessageId") or "",
                 "received": message.get("receivedDateTime") or "",
@@ -85,12 +83,12 @@ class AccountRunner:
         """Keep the message and put it on the retry list; give up after MAX_ATTEMPTS."""
         attempts = self.state.add_retry(message, reason)
         if attempts >= MAX_ATTEMPTS:
-            self.log.error("%s: gave up on a message after %d attempts (%s); it stays in Junk", self.account, attempts, reason)
+            self.log.error("gave up on a message after %d attempts (%s); it stays in Junk", attempts, reason)
             self._record(message, mode, "keep", f"gave up after {attempts} attempts: {reason}", result, action_error=action_error)
             self.state.mark_handled(message)
             counts["keep"] += 1
         else:
-            self.log.warning("%s: %s (attempt %d of %d); kept and will retry", self.account, reason, attempts, MAX_ATTEMPTS)
+            self.log.warning("%s (attempt %d of %d); kept and will retry", reason, attempts, MAX_ATTEMPTS)
             self._record(message, mode, "error", reason, result, action_error=action_error)
             counts["error"] += 1
 
@@ -114,7 +112,7 @@ class AccountRunner:
         if self._qid is None:
             folder = self.graph.create_folder(self.cfg.quarantine_folder)
             self._qid = folder["id"]
-            self.log.info("%s: created the %r folder", self.account, self.cfg.quarantine_folder)
+            self.log.info("created the %r folder", self.cfg.quarantine_folder)
         return self._qid
 
     # ------------------------------------------------------------------ one message
@@ -140,7 +138,7 @@ class AccountRunner:
             raise
         except GraphError as exc:
             if exc.status == 404:
-                self.log.info("%s: a message left Junk before it was fetched; skipping it", self.account)
+                self.log.info("a message left Junk before it was fetched; skipping it")
                 self.state.retry.pop(message["id"], None)
                 return
             self._fail(message, mode, f"fetch failed: {exc}", counts)
@@ -176,7 +174,7 @@ class AccountRunner:
             except NetworkError:
                 raise
             except GraphError as exc:
-                self.log.error("%s: could not delete a message: %s", self.account, exc)
+                self.log.error("could not delete a message: %s", exc)
                 self._fail(message, mode, "delete failed", counts, result, action_error=str(exc))
                 return
             self._record(message, mode, decision, "score at or above the delete threshold", result,
@@ -197,7 +195,7 @@ class AccountRunner:
             except NetworkError:
                 raise
             except GraphError as exc:
-                self.log.error("%s: could not quarantine a message: %s", self.account, exc)
+                self.log.error("could not quarantine a message: %s", exc)
                 self._fail(message, mode, "quarantine failed", counts, result, action_error=str(exc))
                 return
             self._record(message, mode, "quarantined", "score at or above the quarantine threshold", result,
@@ -231,7 +229,7 @@ class AccountRunner:
             except NetworkError:
                 raise
             except GraphError as exc:
-                self.log.error("%s: could not delete an expired quarantined message: %s", self.account, exc)
+                self.log.error("could not delete an expired quarantined message: %s", exc)
                 self._record(message, mode, "error", "quarantine expiry failed", action_error=str(exc),
                              current_message_id=message["id"], folder=self.cfg.quarantine_folder)
                 counts["error"] += 1
@@ -243,9 +241,9 @@ class AccountRunner:
     # ------------------------------------------------------------------ one run
 
     def run(self) -> dict:
-        mode = self.cfg.effective_mode(self.account)
-        for problem in self.cfg.run_problems(self.account):
-            self.log.error("%s: ERROR %s", self.account, problem)
+        mode = self.cfg.effective_mode()
+        for problem in self.cfg.run_problems():
+            self.log.error("ERROR %s", problem)
 
         folder = self.graph.folder()
         folder_count = folder.get("totalItemCount")
@@ -253,12 +251,11 @@ class AccountRunner:
         if mode == "act" and self.cfg.quarantine_enabled:
             problem = self._check_quarantine_folder(folder.get("displayName") or "")
             if problem:
-                self.log.error("%s: ERROR %s; behaving as report-only", self.account, problem)
+                self.log.error("ERROR %s; behaving as report-only", problem)
                 mode = "report-only"
 
         self.log.info(
-            "%s: Junk folder is %r and holds %s messages (mode %s)",
-            self.account,
+            "Junk folder is %r and holds %s messages (mode %s)",
             folder.get("displayName"),
             folder_count,
             mode,
@@ -268,9 +265,8 @@ class AccountRunner:
         messages, new_link = self.graph.delta(self.state.delta_link)
         if first_walk and isinstance(folder_count, int) and len(messages) < folder_count:
             self.log.warning(
-                "%s: the first delta walk returned %d messages but the Junk folder holds %d; "
+                "the first delta walk returned %d messages but the Junk folder holds %d; "
                 "some messages may not be scored",
-                self.account,
                 len(messages),
                 folder_count,
             )
@@ -294,7 +290,7 @@ class AccountRunner:
                 self._process(message, mode, counts, scores)
                 done += 1
                 if done % PROGRESS_EVERY == 0 or done == total:
-                    self.log.info("%s: %d done, %d left", self.account, done, total - done)
+                    self.log.info("%d done, %d left", done, total - done)
                     self.state.save()
                     self.touch()
             # every message is now handled or on the retry list: safe to move the delta link on
@@ -305,8 +301,7 @@ class AccountRunner:
         self._expire_quarantine(mode, counts)
 
         self.log.info(
-            "%s: run summary: %s; Junk folder count %s; score histogram %s",
-            self.account,
+            "run summary: %s; Junk folder count %s; score histogram %s",
             dict(counts) or "nothing new",
             folder_count,
             histogram(scores),

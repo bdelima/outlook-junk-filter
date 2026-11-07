@@ -4,7 +4,7 @@ ARG VERSION=0.0.0
 ARG REVISION=unknown
 
 LABEL org.opencontainers.image.title="outlook-junk-filter" \
-      org.opencontainers.image.description="Scores the Junk folder of two personal Outlook accounts with SpamAssassin and deletes obvious phishing" \
+      org.opencontainers.image.description="Scores the Junk folder of one personal Outlook mailbox with SpamAssassin and deletes obvious phishing" \
       org.opencontainers.image.source="https://github.com/bdelima/outlook-junk-filter" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \

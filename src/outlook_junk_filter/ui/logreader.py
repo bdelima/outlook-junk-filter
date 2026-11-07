@@ -60,7 +60,6 @@ def iter_records(log_dir: Path, stats: Stats | None = None, newest_first: bool =
 
 @dataclass
 class Filters:
-    account: str = ""
     decision: str = ""
     date_from: str = ""  # YYYY-MM-DD
     date_to: str = ""
@@ -69,8 +68,6 @@ class Filters:
     q: str = ""
 
     def matches(self, record: dict) -> bool:
-        if self.account and record.get("account") != self.account:
-            return False
         if self.decision and record.get("decision") != self.decision:
             return False
         day = str(record.get("ts", ""))[:10]
@@ -144,10 +141,10 @@ def all_matching(log_dir: Path, filters: Filters):
     return (r for r in iter_records(log_dir) if filters.matches(r))
 
 
-def find(log_dir: Path, account: str, message_id: str, ts: str) -> dict | None:
+def find(log_dir: Path, message_id: str, ts: str) -> dict | None:
     """The record for one message at one time (a message can have several records)."""
     for record in iter_records(log_dir):
-        if record.get("account") == account and record.get("message_id") == message_id and record.get("ts") == ts:
+        if record.get("message_id") == message_id and record.get("ts") == ts:
             return record
     return None
 
@@ -174,26 +171,21 @@ def header(log_dir: Path, now: datetime | None = None) -> dict:
 
 
 def summary(log_dir: Path) -> dict:
-    """Counts per decision per day and per account, and a whole-number score histogram."""
+    """Counts per decision per day, and a whole-number score histogram."""
     stats = Stats()
     per_day: dict = {}
-    per_account: dict = {}
     hist: dict = {}
     for record in iter_records(log_dir, stats):
         decision = str(record.get("decision", ""))
         day = str(record.get("ts", ""))[:10]
-        account = str(record.get("account", ""))
         per_day.setdefault(day, {}).setdefault(decision, 0)
         per_day[day][decision] += 1
-        per_account.setdefault(account, {}).setdefault(decision, 0)
-        per_account[account][decision] += 1
         score = record.get("score")
         if isinstance(score, (int, float)):
             bucket = int(score // 1)
             hist[bucket] = hist.get(bucket, 0) + 1
     return {
         "per_day": dict(sorted(per_day.items(), reverse=True)),
-        "per_account": dict(sorted(per_account.items())),
         "histogram": dict(sorted(hist.items())),
         "skipped": stats.skipped,
     }
@@ -210,7 +202,7 @@ def what_if(log_dir: Path, quarantine_at: float | None, delete_at: float | None)
         score = record.get("score")
         if not isinstance(score, (int, float)):
             continue
-        key = (record.get("account"), record.get("message_id"))
+        key = record.get("message_id")
         if key not in latest:
             latest[key] = (float(score), bool(record.get("keep_rule_hit")))
     counts = {"kept": 0, "quarantined": 0, "deleted": 0, "allowlisted": 0}

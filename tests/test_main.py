@@ -1,4 +1,4 @@
-"""The main loop and sign-in: a pending sign-in never blocks the other account."""
+"""The main loop and sign-in."""
 
 import logging
 import threading
@@ -8,26 +8,37 @@ import pytest
 from conftest import FakeGraph, msg
 from outlook_junk_filter import __main__ as app
 from outlook_junk_filter import auth as auth_module
-from outlook_junk_filter.auth import AccountAuth, SilentResult
+from outlook_junk_filter.auth import Auth, SilentResult
 from outlook_junk_filter.scoring import ScoreResult
 
 
 class FakeAuth:
-    """live has no token; outlook has one."""
+    """No token yet; sign_in() reports the given outcome."""
 
-    def __init__(self, account, client_id, state_dir, log, touch=None):
-        self.account = account
+    outcome = "expired"
+    has_token = False
+
+    def __init__(self, client_id, state_dir, log, touch=None):
         self.log = log
 
     def silent(self):
-        return SilentResult(token="t") if self.account == "outlook" else SilentResult(needs_signin=True)
+        return SilentResult(token="t") if self.has_token else SilentResult(needs_signin=True)
 
     def access_token(self):
         return "t"
 
     def sign_in(self):
-        self.log.warning("SIGN-IN NEEDED %s: open https://example.invalid/device and enter code ABC123", self.account)
-        return "expired"
+        self.log.warning("SIGN-IN NEEDED: open https://example.invalid/device and enter code ABC123")
+        self.has_token = self.outcome == "ok"
+        return self.outcome
+
+
+class SignedIn(FakeAuth):
+    has_token = True
+
+
+class SignInWorks(FakeAuth):
+    outcome = "ok"
 
 
 def test_missing_client_id_exits_with_a_clear_message(monkeypatch, capsys, tmp_path):
@@ -36,9 +47,9 @@ def test_missing_client_id_exits_with_a_clear_message(monkeypatch, capsys, tmp_p
     assert "OJF_CLIENT_ID" in capsys.readouterr().err
 
 
-def test_pending_sign_in_logs_the_line_and_the_other_account_is_still_processed(monkeypatch, tmp_path, caplog):
+def run_main(monkeypatch, tmp_path, caplog, auth_class):
     monkeypatch.setenv("OJF_CLIENT_ID", "cid")
-    monkeypatch.setattr(app, "AccountAuth", FakeAuth)
+    monkeypatch.setattr(app, "Auth", auth_class)
     monkeypatch.setattr(app.scoring, "lint", lambda *a, **k: (True, ""))
     graphs = []
 
@@ -54,26 +65,41 @@ def test_pending_sign_in_logs_the_line_and_the_other_account_is_still_processed(
     ojf.propagate = True
     monkeypatch.setattr(app, "setup_container_log", lambda: ojf)
     assert app.main(state_dir=tmp_path, loops=1) == 0
-    text = caplog.text
-    assert "SIGN-IN NEEDED live: open https://example.invalid/device and enter code ABC123" in text
-    assert "outlook: Junk folder is" in text  # processed
-    assert len(graphs) == 1  # only the account that has a token ran
+    return caplog.text, graphs
+
+
+def test_pending_sign_in_logs_the_line_and_nothing_is_scored(monkeypatch, tmp_path, caplog):
+    text, graphs = run_main(monkeypatch, tmp_path, caplog, FakeAuth)
+    assert "SIGN-IN NEEDED: open https://example.invalid/device and enter code ABC123" in text
+    assert "Junk folder is" not in text
     assert (tmp_path / "health").exists()
+
+
+def test_a_signed_in_mailbox_is_processed(monkeypatch, tmp_path, caplog):
+    text, _ = run_main(monkeypatch, tmp_path, caplog, SignedIn)
+    assert "Junk folder is" in text and "SIGN-IN NEEDED" not in text
+    assert (tmp_path / "logs" / "decisions.jsonl").exists()
+
+
+def test_a_successful_sign_in_runs_straight_away(monkeypatch, tmp_path, caplog):
+    text, _ = run_main(monkeypatch, tmp_path, caplog, SignInWorks)
+    assert "SIGN-IN NEEDED" in text and "Junk folder is" in text
 
 
 def test_lint_failure_scores_nothing_and_keeps_everything(monkeypatch, tmp_path, caplog):
     monkeypatch.setenv("OJF_CLIENT_ID", "cid")
-    monkeypatch.setattr(app, "AccountAuth", FakeAuth)
+    monkeypatch.setattr(app, "Auth", SignedIn)
     monkeypatch.setattr(app.scoring, "lint", lambda *a, **k: (False, "bad config"))
-    created = []
-    monkeypatch.setattr(app, "GraphClient", lambda *a, **k: created.append(1))
+    graph = FakeGraph([msg(1)])
+    monkeypatch.setattr(app, "GraphClient", lambda *a, **k: graph)
     ojf = logging.getLogger("ojf")
     ojf.propagate = True
     caplog.set_level(logging.INFO, logger="ojf")
     monkeypatch.setattr(app, "setup_container_log", lambda: ojf)
     app.main(state_dir=tmp_path, loops=1)
-    assert created == []
+    assert graph.calls == [] and graph.actions() == []  # nothing fetched, nothing moved
     assert "SpamAssassin config check failed" in caplog.text
+    assert "does not load; scoring nothing" in caplog.text
 
 
 class FakeApp:
@@ -88,12 +114,11 @@ class FakeApp:
 
 
 def make_auth(tmp_path, log, flow, result):
-    a = AccountAuth.__new__(AccountAuth)
-    a.account = "live"
+    a = Auth.__new__(Auth)
     a._log = log
     a._touch = lambda: None
     a._lock = threading.RLock()
-    a._path = tmp_path / "tokens" / "live.json"
+    a._path = tmp_path / "tokens" / "token.json"
     a._app = FakeApp(flow, result)
     a._cache = type("C", (), {"has_state_changed": False})()
     return a
@@ -105,7 +130,7 @@ def test_sign_in_logs_url_and_code_and_reports_expiry(tmp_path, caplog):
     flow = {"user_code": "XYZ789", "verification_uri": "https://microsoft.com/devicelogin"}
     a = make_auth(tmp_path, log, flow, {"error": "authorization_declined"})
     assert a.sign_in() == "expired"
-    assert "SIGN-IN NEEDED live: open https://microsoft.com/devicelogin and enter code XYZ789" in caplog.text
+    assert "SIGN-IN NEEDED: open https://microsoft.com/devicelogin and enter code XYZ789" in caplog.text
     ok = make_auth(tmp_path, log, flow, {"access_token": "secret-token"})
     assert ok.sign_in() == "ok"
     assert "secret-token" not in caplog.text  # tokens are never logged

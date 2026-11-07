@@ -3,15 +3,15 @@
 from datetime import datetime, timezone
 
 from conftest import FakeDecisions, FakeGraph, make_config, msg, scorer
-from outlook_junk_filter.runner import AccountRunner
+from outlook_junk_filter.runner import Runner
 
 NOW = datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)
-ACT = {"OJF_MODE_LIVE": "act", "OJF_DELETE_MODE": "deleted-items"}
+ACT = {"OJF_MODE": "act", "OJF_DELETE_MODE": "deleted-items"}
 
 
 def run(cfg, graph, state, log, score_fn):
     decisions = FakeDecisions()
-    AccountRunner("live", cfg, graph, state, decisions, log, score_fn, now=lambda: NOW).run()
+    Runner(cfg, graph, state, decisions, log, score_fn, now=lambda: NOW).run()
     return decisions.records
 
 
@@ -124,7 +124,7 @@ def test_old_quarantined_messages_are_deleted_young_ones_are_left(state, log):
 
 
 def test_expiry_follows_the_delete_mode(state, log):
-    cfg = make_config(OJF_MODE_LIVE="act", OJF_DELETE_MODE="permanent", OJF_QUARANTINE_THRESHOLD="6")
+    cfg = make_config(OJF_MODE="act", OJF_DELETE_MODE="permanent", OJF_QUARANTINE_THRESHOLD="6")
     graph = FakeGraph([], folders={"Quarantined": "ID-EXISTING"})
     graph.quarantined = [{**msg(8), "receivedDateTime": "2026-01-01T00:00:00Z"}]
     records = run(cfg, graph, state, log, scorer([]))
@@ -151,7 +151,7 @@ def test_a_message_already_past_retention_is_deleted_without_waiting(state, log)
 
 
 def test_expiry_does_nothing_in_report_only_or_when_quarantine_is_off(state, log):
-    for env in ({"OJF_MODE_LIVE": "report-only"}, {**ACT, "OJF_QUARANTINE_ENABLED": "off", "OJF_DELETE_THRESHOLD": "10"}):
+    for env in ({"OJF_MODE": "report-only"}, {**ACT, "OJF_QUARANTINE_ENABLED": "off", "OJF_DELETE_THRESHOLD": "10"}):
         cfg = make_config(**env, OJF_QUARANTINE_THRESHOLD="6")
         graph = FakeGraph([], folders={"Quarantined": "ID-EXISTING"})
         graph.quarantined = [{**msg(8), "receivedDateTime": "2026-01-01T00:00:00Z"}]

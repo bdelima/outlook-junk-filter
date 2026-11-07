@@ -1,4 +1,4 @@
-"""The long-lived process: validate config, then loop over the two accounts."""
+"""The long-lived process: validate config, then loop over the one mailbox."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from pathlib import Path
 
 from . import config as config_module
 from . import scoring
-from .auth import AccountAuth, AuthError
+from .auth import Auth, AuthError
 from .graph import GraphClient, GraphError, NetworkError
 from .logs import DecisionLog, setup_container_log, touch_health
 from .restored import RestoredList
-from .runner import AccountRunner
-from .state import AccountState
+from .runner import Runner
+from .state import State
 from .ui.actions import Actions
 from .ui.server import Context, serve_in_thread
 
@@ -35,38 +35,33 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
         log.error("ERROR %s", problem)
 
     decisions = DecisionLog(cfg.state_dir)
-    auths = {a: AccountAuth(a, cfg.client_id, cfg.state_dir, log, touch) for a in config_module.ACCOUNTS}
-    states = {a: AccountState(a, cfg.state_dir) for a in config_module.ACCOUNTS}
-
+    auth = Auth(cfg.client_id, cfg.state_dir, log, touch)
+    state = State(cfg.state_dir)
     restored = RestoredList(cfg.state_dir)
-
-    def graph_for(account: str) -> GraphClient:
-        return GraphClient(auths[account].access_token, log=log)
+    graph = GraphClient(auth.access_token, log=log)
 
     def score_fn(raw: bytes):
         return scoring.score(raw, cfg.state_dir, config_dir)
 
-    def run_account(account: str, lint_ok: bool) -> None:
+    def run_once(lint_ok: bool) -> None:
         try:
             if not lint_ok:
-                log.error("%s: ERROR SpamAssassin's config does not load; scoring nothing and keeping every message", account)
+                log.error("ERROR SpamAssassin's config does not load; scoring nothing and keeping every message")
                 return
-            AccountRunner(
-                account, cfg, graph_for(account), states[account], decisions, log, score_fn, touch, restored=restored
-            ).run()
+            Runner(cfg, graph, state, decisions, log, score_fn, touch, restored=restored).run()
         except NetworkError as exc:
-            log.error("%s: network failure, skipping this account for the run: %s", account, exc)
+            log.error("network failure, skipping this run: %s", exc)
         except AuthError as exc:
-            log.error("ERROR token refresh failed %s: %s", account, exc)
+            log.error("ERROR token refresh failed: %s", exc)
         except GraphError as exc:
-            log.error("%s: Graph call failed, skipping this account for the run: %s", account, exc)
-        except Exception:  # one account must never stop the loop
-            log.exception("%s: unexpected error, carrying on", account)
+            log.error("Graph call failed, skipping this run: %s", exc)
+        except Exception:  # an unexpected error must never stop the loop
+            log.exception("unexpected error, carrying on")
         finally:
             touch()
 
     try:  # the review page lives in this process; if it cannot start, the job still runs
-        actions = Actions(graph_for, restored, cfg.state_dir, Path(config_dir))
+        actions = Actions(graph, restored, cfg.state_dir, Path(config_dir))
         serve_in_thread(cfg.ui_port, Context(cfg.state_dir / "logs", actions, csrf=cfg.ui_csrf))
         log.info("Review page on port %d", cfg.ui_port)
     except OSError as exc:
@@ -81,27 +76,19 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
         else:
             log.error("ERROR SpamAssassin config check failed: %s", detail)
 
-        ready, pending = [], []
-        for account in config_module.ACCOUNTS:
-            result = auths[account].silent()
-            if result.token:
-                ready.append(account)
-                continue
-            if result.error:
-                log.error("ERROR token refresh failed %s: %s", account, result.error)
-            if result.needs_signin:
-                pending.append(account)
-
-        for account in ready:  # accounts with tokens first, so a pending sign-in never blocks them
-            run_account(account, lint_ok)
-
         waited = False
-        for account in pending:
-            outcome = auths[account].sign_in()
-            if outcome == "ok":
-                run_account(account, lint_ok)
-            elif outcome == "expired":
-                waited = True  # waiting for the code already paced this loop
+        result = auth.silent()
+        if result.token:
+            run_once(lint_ok)
+        else:
+            if result.error:
+                log.error("ERROR token refresh failed: %s", result.error)
+            if result.needs_signin:
+                outcome = auth.sign_in()
+                if outcome == "ok":
+                    run_once(lint_ok)
+                elif outcome == "expired":
+                    waited = True  # waiting for the code already paced this loop
 
         touch()
         count += 1

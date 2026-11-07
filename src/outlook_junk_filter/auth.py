@@ -1,4 +1,4 @@
-"""Sign-in with MSAL: one public-client app and one token cache file per account."""
+"""Sign-in with MSAL: one public-client app and one token cache file (/state/tokens/token.json)."""
 
 from __future__ import annotations
 
@@ -29,10 +29,9 @@ class SilentResult:
     error: str | None = None  # set when a refresh failed (log it)
 
 
-class AccountAuth:
-    def __init__(self, account: str, client_id: str, state_dir: Path, log, touch_health=lambda: None):
-        self.account = account
-        self._path = Path(state_dir) / "tokens" / f"{account}.json"
+class Auth:
+    def __init__(self, client_id: str, state_dir: Path, log, touch_health=lambda: None):
+        self._path = Path(state_dir) / "tokens" / "token.json"
         self._log = log
         self._touch = touch_health
         self._lock = threading.RLock()  # the job and the review page share this token cache
@@ -41,7 +40,7 @@ class AccountAuth:
             try:
                 self._cache.deserialize(self._path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as exc:
-                self._log.error("ERROR could not read the token cache for %s: %s", account, exc)
+                self._log.error("ERROR could not read the token cache: %s", exc)
         self._app = msal.PublicClientApplication(client_id, authority=AUTHORITY, token_cache=self._cache)
 
     def _save(self) -> None:
@@ -65,7 +64,7 @@ class AccountAuth:
             return SilentResult(needs_signin=True)
         try:
             result = self._app.acquire_token_silent(SCOPES, account=accounts[0])
-        except Exception as exc:  # network or MSAL failure: skip the account this run
+        except Exception as exc:  # network or MSAL failure: skip this run
             return SilentResult(error=f"{type(exc).__name__}: {exc}")
         self._save()
         if result and "access_token" in result:
@@ -88,11 +87,10 @@ class AccountAuth:
         """Run the device code flow once. Returns "ok", "expired" (code ran out) or "failed" (could not start)."""
         flow = self._app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
-            self._log.error("ERROR could not start sign-in for %s: %s", self.account, flow.get("error_description", flow))
+            self._log.error("ERROR could not start sign-in: %s", flow.get("error_description", flow))
             return "failed"
         self._log.warning(
-            "SIGN-IN NEEDED %s: open %s and enter code %s",
-            self.account,
+            "SIGN-IN NEEDED: open %s and enter code %s",
             flow["verification_uri"],
             flow["user_code"],
         )
@@ -108,7 +106,7 @@ class AccountAuth:
         result = self._app.acquire_token_by_device_flow(flow, exit_condition=keep_alive)
         if result and "access_token" in result:
             self._save()
-            self._log.info("Signed in %s", self.account)
+            self._log.info("Signed in")
             return "ok"
-        self._log.warning("The sign-in code for %s expired or was refused; a fresh code follows", self.account)
+        self._log.warning("The sign-in code expired or was refused; a fresh code follows")
         return "expired"
