@@ -17,7 +17,13 @@ scores and switched an account to `act`.
   decides, and logs.
 - Decision, in order: a fired rule matches `OJF_KEEP_RULE_PATTERN` (allowlisted) means keep; a message that could not
   be scored means keep and retry (3 attempts, then give up and keep); a score at or above `OJF_DELETE_THRESHOLD`
-  means delete (`would-delete` in report-only mode); anything else means keep.
+  means delete; otherwise a score at or above `OJF_QUARANTINE_THRESHOLD` means move to the quarantine folder; anything
+  else means keep. In report-only mode these are logged as `would-delete` and `would-quarantine` and nothing is sent
+  to Graph.
+- **Quarantine.** Flagged messages are moved out of Junk into a top-level folder of the same mailbox (`Quarantined` by
+  default), so you can review them in Outlook. The job still scans only Junk. It reads the quarantine folder only to
+  delete messages whose received time is older than `OJF_QUARANTINE_RETENTION_DAYS`, the way `OJF_DELETE_MODE` says.
+  Restore a wrongly flagged message by moving it back in Outlook. There is no per-run cap on deletions or moves.
 - Any error fetching, scoring or acting on a message keeps it. Invalid settings never cause deletion.
 - The delta link is saved only after every message in the pass is handled or on the retry list, so a crash replays
   the pass instead of skipping mail.
@@ -47,15 +53,20 @@ declared. Set the variables in Portainer's **Environment variables** panel, not 
 | `OJF_INTERVAL_SECONDS` | no | `900` | Seconds between runs. Values below 60 are raised to 60 and logged. |
 | `OJF_MODE_LIVE` | no | `report-only` | `report-only` or `act`, for the live.com account. |
 | `OJF_MODE_OUTLOOK` | no | `report-only` | The same, for the outlook.com account. |
-| `OJF_DELETE_MODE` | when a mode is `act` | none | `deleted-items` (recoverable in Outlook) or `permanent` (not recoverable). Neither is a default. |
-| `OJF_DELETE_THRESHOLD` | when a mode is `act` | none | SpamAssassin score, as a decimal, at or above which a message is deleted. |
-| `OJF_MAX_DELETES_PER_RUN` | no | no cap | If set, an account stops deleting after this many deletions in one run; the rest wait for the next run. |
+| `OJF_DELETE_MODE` | when a mode is `act` | none | `deleted-items` (recoverable in Outlook) or `permanent` (not recoverable). Neither is a default. Also used when quarantined messages expire. |
+| `OJF_DELETE_THRESHOLD` | when a mode is `act`, unless `OJF_QUARANTINE_THRESHOLD` is set | none | SpamAssassin score, as a decimal, at or above which a message is deleted. |
+| `OJF_QUARANTINE_ENABLED` | no | `on` | `on` or `off`. Turns the quarantine feature on or off. |
+| `OJF_QUARANTINE_FOLDER` | no | `Quarantined` | Name of the top-level folder flagged messages are moved to. Any name works, except a system folder such as Junk or Inbox. Created if missing; an existing folder of that name is reused. |
+| `OJF_QUARANTINE_THRESHOLD` | no | none | Score at or above which a message is moved to the folder. Must be lower than `OJF_DELETE_THRESHOLD` when both are set. With only this set, nothing is deleted at score time. |
+| `OJF_QUARANTINE_RETENTION_DAYS` | no | `7` | Days a message stays in the folder before the job deletes it. The age counts from the message's received time, so one already older than this is deleted on the next pass. |
 | `OJF_KEEP_RULE_PATTERN` | no | `^USER_IN_.*(WHITE\|WELCOME)LIST` | Regular expression. A message that fired any matching rule is always kept. |
 | `TZ` | no | `UTC` | Timezone of log timestamps. |
 
 An empty value counts as unset. An unrecognized mode is treated as `report-only` and logged as an error. A mode of
-`act` with a missing or invalid `OJF_DELETE_MODE` or `OJF_DELETE_THRESHOLD` makes that account behave as
-`report-only` and logs an error on every run.
+`act` makes that account behave as `report-only`, and logs an error on every run, when `OJF_DELETE_MODE` is missing or
+invalid, when neither `OJF_DELETE_THRESHOLD` nor `OJF_QUARANTINE_THRESHOLD` is set (a quarantine threshold counts only
+while quarantine is on), when the quarantine threshold is not lower than the delete threshold, or when
+`OJF_QUARANTINE_FOLDER` names the Junk folder or another system folder.
 
 ### First sign-in
 
@@ -93,8 +104,9 @@ is written). It needs outbound HTTPS to `graph.microsoft.com` and `login.microso
    defaults to it). Build the allowlist from sender domains that pass DKIM and carry `List-Unsubscribe`.
 3. Choose the threshold where almost nothing wanted lies above it. SpamAssassin's default spam mark is 5.0, but its
    documentation advises deleting automatically only at exceptionally high scores such as 15.0 or higher.
-4. Set `OJF_DELETE_MODE` (start with `deleted-items`), `OJF_DELETE_THRESHOLD`, optionally `OJF_MAX_DELETES_PER_RUN`,
-   switch **one** account to `act`, update the stack, and check that account's Deleted Items by hand.
+4. Set `OJF_DELETE_MODE` (start with `deleted-items`) and a threshold: `OJF_QUARANTINE_THRESHOLD` to start by moving
+   flagged mail to the quarantine folder (the gentlest way to build confidence), and later `OJF_DELETE_THRESHOLD`.
+   Switch **one** account to `act`, update the stack, and check that account's quarantine folder by hand.
 5. Then enable the second account the same way.
 
 To bring in newer SpamAssassin rules, update the stack with force-rebuild: rules are fixed when the image is built.
@@ -105,12 +117,13 @@ To bring in newer SpamAssassin rules, update the stack with force-rebuild: rules
   account (counts per decision, the Junk folder count, a score histogram) and `ERROR` lines for failed refreshes.
 - `decisions.jsonl` fields: `ts`, `account`, `message_id`, `internet_message_id`, `received`, `from_addr`, `subject`
   (cut to 120 characters), `score`, `rules`, `keep_rule_hit`, `relays_untrusted`, `first_untrusted_ip`,
-  `auth_results_present`, `mode`, `decision` (`keep`, `would-delete`, `deleted`, `permanently-deleted` or `error`),
-  `reason` and `action_error`. Message bodies, attachments and tokens are never logged.
+  `auth_results_present`, `mode`, `decision` (`keep`, `would-delete`, `would-quarantine`, `quarantined`, `deleted`,
+  `permanently-deleted` or `error`), `reason`, `action_error`, and `current_message_id` and `folder` (where the message
+  is now: Graph gives a moved message a new id). Message bodies, attachments and tokens are never logged.
 
 ## Not in v1
 
-Alerting beyond log lines and the health check, Bayes training, moving wanted bulk mail to another folder, Razor/Pyzor/DCC
+Alerting beyond log lines and the health check, Bayes training, moving wanted bulk mail out of Junk (only flagged messages move), Razor/Pyzor/DCC
 and URL-reputation or LLM checks, a separate spamd container, and scheduled rebuilds are not built. Only SpamAssassin's
 built-in DNS blocklists and URL lists run, when `/config/local.cf` and DNS allow them.
 
