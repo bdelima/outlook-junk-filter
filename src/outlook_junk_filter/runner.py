@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+from .ai import AiError, extract_text
 from .graph import GraphError, NetworkError
 from .logs import SUBJECT_MAX, histogram
 from .scoring import ScoreError
@@ -25,7 +26,7 @@ def _from_addr(message: dict) -> str:
 
 
 class Runner:
-    def __init__(self, cfg, graph, state, decisions, log, score_fn, touch=lambda: None, now=None, restored=None):
+    def __init__(self, cfg, graph, state, decisions, log, score_fn, touch=lambda: None, now=None, restored=None, ai=None):
         self.cfg = cfg
         self.graph = graph
         self.state = state
@@ -37,6 +38,10 @@ class Runner:
         self.restored = restored  # messages restored from the review page: always kept
         self._scored = 0  # messages scored this run, and how many carried a Microsoft SCL header
         self._scl_seen = 0
+        self.ai = ai if cfg.ai_url else None  # an AiClient, or None: AI scoring is off
+        self._ai_rated = 0
+        self._ai_failed = 0
+        self._ai_down = False  # the AI server failed this run: stop asking
         self._qid: str | None = None  # the quarantine folder's id once resolved
 
     # ------------------------------------------------------------------ records
@@ -77,6 +82,8 @@ class Runner:
                 "reason": reason,
                 "action_error": action_error,
                 "ms_scl": result.ms_scl if result else None,
+                "ai_score": result.ai_score if result else None,
+                "ai_reason": result.ai_reason if result else "",
                 "current_message_id": message["id"] if current_message_id is None else current_message_id,
                 "folder": JUNK if folder is None else folder,
             }
@@ -94,6 +101,36 @@ class Runner:
             self.log.warning("%s (attempt %d of %d); kept and will retry", reason, attempts, MAX_ATTEMPTS)
             self._record(message, mode, "error", reason, result, action_error=action_error)
             counts["error"] += 1
+
+    # ------------------------------------------------------------------ AI rating
+
+    def _ask_ai(self, message, raw, result) -> None:
+        """Ask the AI about a message whose score so far is in the configured range; add points for a high rating.
+
+        Never fatal: any failure means no points. A failure that repeats (server unreachable, HTTP error) stops
+        further requests for the rest of the run.
+        """
+        if self.ai is None or self._ai_down:
+            return
+        upper = self.cfg.ai_upper
+        if result.score < self.cfg.ai_min_score or (upper is not None and result.score >= upper):
+            return
+        try:
+            rating = self.ai.rate(_from_addr(message), message.get("subject") or "", extract_text(raw))
+        except AiError as exc:
+            self._ai_failed += 1
+            if exc.server_down:
+                self._ai_down = True
+                self.log.warning("AI scoring server failed (%s); skipping AI scoring for the rest of this run", exc)
+            else:
+                self.log.warning("AI rating unusable for one message: %s", exc)
+            return
+        self._ai_rated += 1
+        result.ai_score, result.ai_reason = rating.score, rating.reason
+        points = self.cfg.ai_points(rating.score)
+        if points:
+            result.score = round(result.score + points, 3)
+            result.rules = [*result.rules, f"OJF_AI_{int(round(rating.score))}"]
 
     # ------------------------------------------------------------------ quarantine folder
 
@@ -158,8 +195,10 @@ class Runner:
             result.rules = [*result.rules, f"OJF_MS_SCL_{result.ms_scl}"]
         self._scored += 1
         self._scl_seen += result.ms_scl is not None
-        scores.append(result.score)
         keep_rule_hit = any(self.cfg.keep_pattern.search(rule) for rule in result.rules)
+        if not keep_rule_hit:
+            self._ask_ai(message, raw, result)
+        scores.append(result.score)
 
         # 1. allowlist
         if keep_rule_hit:
@@ -309,6 +348,16 @@ class Runner:
 
         self._expire_quarantine(mode, counts)
 
+        if self.ai is not None and (self._ai_rated or self._ai_failed):
+            self.log.info(
+                "AI rated %d of %d scored messages (score range %s to %s, up to +%s points); %d failed",
+                self._ai_rated,
+                self._scored,
+                self.cfg.ai_min_score,
+                self.cfg.ai_upper if self.cfg.ai_upper is not None else "no limit",
+                self.cfg.ai_max_points,
+                self._ai_failed,
+            )
         if self._scored:
             self.log.info(
                 "Microsoft SCL header present on %d of %d scored messages (OJF_MS_SCL_POINTS %s)",

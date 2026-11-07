@@ -174,7 +174,7 @@ def test_records_carry_the_documented_fields_and_cut_subjects(state, log):
     assert set(record) == {
         "ts", "message_id", "internet_message_id", "received", "from_addr", "subject",
         "score", "rules", "keep_rule_hit", "relays_untrusted", "first_untrusted_ip",
-        "auth_results_present", "mode", "decision", "reason", "action_error", "ms_scl", "current_message_id", "folder",
+        "auth_results_present", "mode", "decision", "reason", "action_error", "ms_scl", "ai_score", "ai_reason", "current_message_id", "folder",
     }
     assert len(record["subject"]) == 120
     assert "body" not in record

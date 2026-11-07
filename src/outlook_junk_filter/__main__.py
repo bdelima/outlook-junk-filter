@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import config as config_module
 from . import scoring
+from .ai import AiClient
 from .auth import Auth, AuthError
 from .graph import GraphClient, GraphError, NetworkError
 from .logs import DecisionLog, setup_container_log, touch_health
@@ -39,6 +40,7 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
     state = State(cfg.state_dir)
     restored = RestoredList(cfg.state_dir)
     graph = GraphClient(auth.access_token, log=log)
+    ai = AiClient(cfg.ai_url, cfg.ai_model, cfg.ai_timeout) if cfg.ai_url else None
 
     def score_fn(raw: bytes):
         return scoring.score(raw, cfg.state_dir, config_dir)
@@ -48,7 +50,7 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
             if not lint_ok:
                 log.error("ERROR SpamAssassin's config does not load; scoring nothing and keeping every message")
                 return
-            Runner(cfg, graph, state, decisions, log, score_fn, touch, restored=restored).run()
+            Runner(cfg, graph, state, decisions, log, score_fn, touch, restored=restored, ai=ai).run()
         except NetworkError as exc:
             log.error("network failure, skipping this run: %s", exc)
         except AuthError as exc:
