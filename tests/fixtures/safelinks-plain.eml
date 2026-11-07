@@ -1,0 +1,22 @@
+Received: from mail.sender-host.invalid (mail.sender-host.invalid
+ [192.0.2.55]) by example-mx.invalid with ESMTP id 1234567890; Sat, 7 Nov 2026
+ 10:00:00 +0000
+Authentication-Results: spf=pass (sender IP is 192.0.2.55)
+ smtp.mailfrom=sender-host.invalid; dkim=pass (signature was verified)
+ header.d=sender-host.invalid; dmarc=pass action=none
+ header.from=sender-host.invalid;
+X-MS-Exchange-Organization-SCL: 8
+X-Microsoft-Antispam: BCL:0;
+From: "Prize Desk" <desk@sender-host.invalid>
+To: someone@example.invalid
+Subject: Your reward is waiting
+Date: Sat, 07 Nov 2026 10:00:00 +0000
+Message-ID: <safelinks-plain@sender-host.invalid>
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Congratulations, you have been selected.</p><p><a href=3D"http=
+s://ojf-synthetic-target.shop/offer?id=3D1&amp;ref=3Da">Claim your reward now=
+</a></p><p><a href=3D"https://ojf-synthetic-target.shop/unsubscribe">Unsubscr=
+ibe</a></p></body></html>
