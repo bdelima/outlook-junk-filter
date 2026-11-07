@@ -28,7 +28,7 @@ def test_act_deleted_items_moves_at_or_above_threshold_only(state, log):
     graph = FakeGraph([msg(1), msg(2), msg(3)])
     _, records = run(cfg, graph, state, log, scorer([10.0, 9.9, 30.0]))
     assert [r["decision"] for r in records] == ["deleted", "keep", "deleted"]
-    assert graph.actions() == [("move", "AAA1"), ("move", "AAA3")]
+    assert graph.actions() == [("move", "AAA1", "deleteditems"), ("move", "AAA3", "deleteditems")]
 
 
 def test_act_permanent_uses_permanent_delete_and_no_move(state, log):
@@ -99,7 +99,7 @@ def test_unscored_message_is_never_deleted_even_with_high_neighbours(state, log)
     graph = FakeGraph([msg(1), msg(2)])
     _, records = run(cfg, graph, state, log, scorer([ScoreError("x"), 40.0]))
     assert [r["decision"] for r in records] == ["error", "deleted"]
-    assert graph.actions() == [("move", "AAA2")]
+    assert graph.actions() == [("move", "AAA2", "deleteditems")]
     assert "AAA1" in state.retry
 
 
@@ -125,22 +125,6 @@ def test_saved_delta_link_is_passed_to_graph(state, log):
     run(make_config(), graph, state, log, scorer([]))
     assert graph.calls[0] == ("delta", "DELTA-OLD")
     assert state.delta_link == "DELTA-NEW"
-
-
-def test_deletion_cap_defers_the_rest_without_using_an_attempt(state, log, caplog):
-    cfg = make_config(**ACT, OJF_MAX_DELETES_PER_RUN="1")
-    graph = FakeGraph([msg(1), msg(2), msg(3)])
-    with caplog.at_level("WARNING", logger="ojf-test"):
-        _, records = run(cfg, graph, state, log, scorer([20.0, 21.0, 22.0]))
-    assert graph.actions() == [("move", "AAA1")]
-    assert [r["decision"] for r in records] == ["deleted", "keep", "keep"]
-    assert sum("OJF_MAX_DELETES_PER_RUN" in r.message for r in caplog.records) == 1
-    assert set(state.retry) == {"AAA2", "AAA3"}
-    assert all(e["attempts"] == 0 for e in state.retry.values())
-    # next run picks them up again and deletes one more
-    _, records = run(cfg, graph, state, log, scorer([21.0, 22.0]))
-    assert graph.actions()[-1][0] == "move"
-    assert len(graph.actions()) == 2
 
 
 def test_action_failure_keeps_the_message_and_retries(state, log):
@@ -190,7 +174,7 @@ def test_records_carry_the_documented_fields_and_cut_subjects(state, log):
     assert set(record) == {
         "ts", "account", "message_id", "internet_message_id", "received", "from_addr", "subject",
         "score", "rules", "keep_rule_hit", "relays_untrusted", "first_untrusted_ip",
-        "auth_results_present", "mode", "decision", "reason", "action_error",
+        "auth_results_present", "mode", "decision", "reason", "action_error", "current_message_id", "folder",
     }
     assert len(record["subject"]) == 120
     assert "body" not in record

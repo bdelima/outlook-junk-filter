@@ -102,13 +102,53 @@ class GraphClient:
     def raw(self, message_id: str) -> bytes:
         return self._request("GET", f"{BASE}/me/messages/{quote(message_id, safe='')}/$value").content
 
-    def move_to_deleted_items(self, message_id: str) -> None:
-        self._request(
+    def move(self, message_id: str, destination: str) -> str:
+        """Move a message to a folder (a folder id or a well-known name). Returns the moved message's new id."""
+        resp = self._request(
             "POST",
             f"{BASE}/me/messages/{quote(message_id, safe='')}/move",
-            json={"destinationId": "deleteditems"},
+            json={"destinationId": destination},
             expect=(200, 201),
         )
+        try:
+            return (resp.json() or {}).get("id") or ""
+        except ValueError:
+            return ""
+
+    def move_to_deleted_items(self, message_id: str) -> str:
+        return self.move(message_id, "deleteditems")
+
+    def find_folder(self, name: str) -> dict | None:
+        """A top-level folder of this name, or None."""
+        odata_name = "'" + name.replace("'", "''") + "'"
+        flt = quote("displayName eq " + odata_name, safe="")
+        url = f"{BASE}/me/mailFolders?$filter={flt}&$select=id,displayName"
+        for item in self._request("GET", url).json().get("value", []):
+            if (item.get("displayName") or "").casefold() == name.casefold():
+                return item
+        return None
+
+    def create_folder(self, name: str) -> dict:
+        """Create a top-level folder."""
+        return self._request("POST", f"{BASE}/me/mailFolders", json={"displayName": name}, expect=(200, 201)).json()
+
+    def well_known_folder_id(self, name: str) -> str:
+        """The id of a well-known folder such as junkemail, inbox or deleteditems."""
+        return self._request("GET", f"{BASE}/me/mailFolders/{name}?$select=id").json().get("id") or ""
+
+    def old_messages(self, folder_id: str, received_before: str) -> list:
+        """Messages in a folder received before an ISO time (UTC, ending in Z)."""
+        flt = quote(f"receivedDateTime lt {received_before}", safe="")
+        url = (
+            f"{BASE}/me/mailFolders/{quote(folder_id, safe='')}/messages?$filter={flt}"
+            f"&$select={DELTA_SELECT}&$top=50"
+        )
+        out = []
+        while url:
+            data = self._request("GET", url).json()
+            out.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+        return out
 
     def permanent_delete(self, message_id: str) -> None:
         self._request("POST", f"{BASE}/me/messages/{quote(message_id, safe='')}/permanentDelete", expect=(204,))

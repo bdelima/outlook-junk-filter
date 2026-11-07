@@ -89,8 +89,8 @@ def test_http_error_is_a_graph_error():
 
 
 def test_move_and_permanent_delete_calls():
-    c, session = client([Resp(201, data={}), Resp(204)])
-    c.move_to_deleted_items("A/B=")
+    c, session = client([Resp(201, data={"id": "NEW-ID"}), Resp(204)])
+    assert c.move_to_deleted_items("A/B=") == "NEW-ID"
     c.permanent_delete("A/B=")
     (m1, u1, kw1), (m2, u2, kw2) = session.requests
     assert (m1, kw1["json"]) == ("POST", {"destinationId": "deleteditems"})
@@ -115,3 +115,33 @@ def test_delta_gone_twice_is_an_error():
 
 def test_delta_gone_is_exported():
     assert issubclass(DeltaGone, Exception)
+
+
+def test_move_to_a_folder_returns_the_new_id():
+    c, session = client([Resp(201, data={"id": "NEW"})])
+    assert c.move("M1", "FOLDERID") == "NEW"
+    assert session.requests[0][2]["json"] == {"destinationId": "FOLDERID"}
+
+
+def test_find_folder_escapes_quotes_and_matches_the_name_exactly():
+    c, session = client([Resp(data={"value": [{"id": "1", "displayName": "Other"}, {"id": "2", "displayName": "o'Brien"}]})])
+    assert c.find_folder("O'Brien")["id"] == "2"
+    assert "o%27%27Brien" in session.requests[0][1].lower() or "O%27%27Brien" in session.requests[0][1]
+    c, _ = client([Resp(data={"value": []})])
+    assert c.find_folder("Nope") is None
+
+
+def test_create_folder_posts_a_top_level_folder():
+    c, session = client([Resp(201, data={"id": "F", "displayName": "Quarantined"})])
+    assert c.create_folder("Quarantined")["id"] == "F"
+    method, url, kw = session.requests[0]
+    assert (method, url, kw["json"]) == ("POST", graph_module.BASE + "/me/mailFolders", {"displayName": "Quarantined"})
+
+
+def test_old_messages_filters_by_received_time_and_follows_next_link():
+    c, session = client(
+        [Resp(data={"value": [{"id": "1"}], "@odata.nextLink": "NEXT"}), Resp(data={"value": [{"id": "2"}]})]
+    )
+    assert [m["id"] for m in c.old_messages("FID", "2026-11-01T00:00:00Z")] == ["1", "2"]
+    assert "receivedDateTime%20lt%202026-11-01T00%3A00%3A00Z" in session.requests[0][1]
+    assert session.requests[1][1] == "NEXT"

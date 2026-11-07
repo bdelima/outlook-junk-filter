@@ -29,7 +29,12 @@ def msg(n, subject="hello", internet_id=None):
 
 
 class FakeGraph:
-    def __init__(self, messages=(), delta_link="DELTA-NEW", folder_count=None):
+    WELL_KNOWN = {
+        "junkemail": "ID-JUNK", "inbox": "ID-INBOX", "deleteditems": "ID-DELETED", "sentitems": "ID-SENT",
+        "drafts": "ID-DRAFTS", "outbox": "ID-OUTBOX", "archive": "ID-ARCHIVE",
+    }
+
+    def __init__(self, messages=(), delta_link="DELTA-NEW", folder_count=None, folders=None):
         self.messages = list(messages)
         self.delta_link = delta_link
         self.folder_count = len(self.messages) if folder_count is None else folder_count
@@ -38,6 +43,9 @@ class FakeGraph:
         self.fail_move = False
         self.fail_perm = False
         self.raw_errors = {}  # message id -> exception to raise
+        self.folders = dict(folders or {})  # top-level display name -> id (besides the system ones)
+        self.system_names = {"Junk Email": "ID-JUNK", "Inbox": "ID-INBOX", "Deleted Items": "ID-DELETED"}
+        self.quarantined = []  # messages sitting in the quarantine folder, for the expiry pass
 
     def folder(self):
         return {"displayName": "Junk Email", "totalItemCount": self.folder_count}
@@ -51,15 +59,39 @@ class FakeGraph:
             raise self.raw_errors[message_id]
         return self.raws.get(message_id, b"Subject: x\r\n\r\nbody")
 
-    def move_to_deleted_items(self, message_id):
-        self.calls.append(("move", message_id))
+    def find_folder(self, name):
+        self.calls.append(("find_folder", name))
+        for table in (self.system_names, self.folders):
+            for display, fid in table.items():
+                if display.casefold() == name.casefold():
+                    return {"id": fid, "displayName": display}
+        return None
+
+    def create_folder(self, name):
+        self.calls.append(("create_folder", name))
+        self.folders[name] = f"ID-{name}"
+        return {"id": f"ID-{name}", "displayName": name}
+
+    def well_known_folder_id(self, name):
+        return self.WELL_KNOWN[name]
+
+    def move(self, message_id, destination):
+        self.calls.append(("move", message_id, destination))
         if self.fail_move:
             raise GraphError(500, "boom")
+        return f"MOVED-{message_id}"
+
+    def move_to_deleted_items(self, message_id):
+        return self.move(message_id, "deleteditems")
 
     def permanent_delete(self, message_id):
         self.calls.append(("permanentDelete", message_id))
         if self.fail_perm:
             raise GraphError(500, "boom")
+
+    def old_messages(self, folder_id, received_before):
+        self.calls.append(("old_messages", folder_id, received_before))
+        return [m for m in self.quarantined if m["receivedDateTime"] < received_before]
 
     def actions(self):
         return [c for c in self.calls if c[0] in ("move", "permanentDelete")]
