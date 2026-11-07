@@ -147,8 +147,8 @@ To bring in newer SpamAssassin rules, update the stack with force-rebuild: rules
 
 ### Extra rules shipped in the image
 
-`rules/ojf-rules.cf` is loaded on every scoring run (`spamassassin --cf="include /app/rules/ojf-rules.cf"`); your own rules
-stay in `/config/local.cf`. It currently holds `OJF_ED_SPAM` (+3.0): erectile-dysfunction spam that describes the effect
+`rules/ojf-rules.cf` is installed into the image next to SpamAssassin's stock rules and loaded on every scoring run; your own
+rules stay in `/config/local.cf`, which loads after it and can override a score. It currently holds `OJF_ED_SPAM` (+3.0): erectile-dysfunction spam that describes the effect
 ("rock-hard for hours", "blood flow", "no prescriptions") instead of naming a drug, so the stock pharmacy rules miss it. It
 fires only when two of three phrase groups match (subject, effect, pitch), so a health newsletter that mentions blood flow
 scores nothing. To switch it off, add `score OJF_ED_SPAM 0` to `/config/local.cf` (the image test checks this works).

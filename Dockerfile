@@ -28,8 +28,11 @@ RUN apt-get update \
 # directory: the sa-update directory (/var/lib/spamassassin/<version>) once sa-update has
 # run, else /usr/share/spamassassin. Copy them there, so /config only needs the user's own
 # local.cf. The test below fails the build if the Check plugin still cannot load.
+# The same directory takes the image's own rules (rules/ojf-rules.cf, as 99_ojf.cf): they load before /config/local.cf, so
+# the user's file can override a score, and the lint below fails the build if the rules file is broken.
+COPY rules/ojf-rules.cf /usr/local/share/ojf-rules.cf
 RUN for dir in /var/lib/spamassassin/[0-9]* /usr/share/spamassassin; do \
-      [ -d "$dir" ] && cp /etc/spamassassin/*.pre "$dir"/; \
+      [ -d "$dir" ] && cp /etc/spamassassin/*.pre "$dir"/ && cp /usr/local/share/ojf-rules.cf "$dir"/99_ojf.cf; \
     done; \
     mkdir -p /tmp/sa-check && echo "report_safe 0" > /tmp/sa-check/local.cf \
  && HOME=/tmp spamassassin --lint --siteconfigpath /tmp/sa-check \
@@ -46,7 +49,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ /app/src/
-COPY rules/ /app/rules/
 COPY LICENSE ATTRIBUTION.md /app/
 
 # The release version, read-only for the operator: label above and APP_VERSION must equal the tag.
