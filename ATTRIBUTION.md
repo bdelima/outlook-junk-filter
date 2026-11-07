@@ -11,14 +11,13 @@ this file in the same PR. If an upstream has no stated license, say so here
 and say how that was handled.
 -->
 
-## TODO: first third-party project
-
-- **Project:** TODO link
-- **License:** TODO SPDX id (copyright holder)
-- **How it's used:** TODO (build-time dependency / binary copied into the image / API only, no code included / derived from)
+Nothing third-party is included yet: this scaffold contains no code, no
+dependencies and no Dockerfile. The PR that adds the image lists every item
+here (SpamAssassin, msal, requests, the Python base image and the Debian
+packages), with its license checked against upstream and how it is used.
 
 ## Trademarks
 
-TODO: name any third-party product names this project refers to (they belong
-to their owners) and state that this is an unofficial project, not affiliated
-with or endorsed by them. Delete this section if nothing applies.
+Microsoft, Outlook, Outlook.com, Live.com and Microsoft Graph are trademarks
+of Microsoft Corporation. This is an unofficial project, not affiliated with
+or endorsed by Microsoft. It only calls the documented Microsoft Graph API.
