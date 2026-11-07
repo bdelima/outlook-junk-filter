@@ -50,6 +50,20 @@ def test_delta_follows_next_link_and_returns_delta_link_ignoring_removed():
     assert session.requests[1][1] == "NEXT"
 
 
+def test_delta_sets_page_size_by_header_on_every_page_and_never_uses_top():
+    c, session = client(
+        [
+            Resp(data={"value": [{"id": "1"}], "@odata.nextLink": "NEXT"}),
+            Resp(data={"value": [{"id": "2"}], "@odata.deltaLink": "DELTA"}),
+        ]
+    )
+    c.delta(None)
+    assert "$top" not in graph_module.DELTA_URL
+    for _, _, kw in session.requests:
+        assert kw["headers"]["Prefer"] == "odata.maxpagesize=50"
+        assert kw["headers"]["Authorization"] == "Bearer tok"
+
+
 def test_delta_uses_saved_link_and_restarts_from_scratch_on_410():
     c, session = client([Resp(410), Resp(data={"value": [{"id": "9"}], "@odata.deltaLink": "D2"})])
     messages, link = c.delta("SAVED/delta?token=1")

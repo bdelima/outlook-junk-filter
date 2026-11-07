@@ -9,7 +9,10 @@ import requests
 
 BASE = "https://graph.microsoft.com/v1.0"
 DELTA_SELECT = "id,receivedDateTime,from,subject,internetMessageId"
-DELTA_URL = f"{BASE}/me/mailFolders/junkemail/messages/delta?$select={DELTA_SELECT}&$top=50"
+# No $top on the delta query: Graph appears to treat it as a cap on the whole round (the first real
+# deployment scored 50 of 570 messages). The documented page-size control is the Prefer header.
+DELTA_URL = f"{BASE}/me/mailFolders/junkemail/messages/delta?$select={DELTA_SELECT}"
+DELTA_HEADERS = {"Prefer": "odata.maxpagesize=50"}
 MAX_RETRIES = 6
 MAX_WAIT = 300
 TIMEOUT = 60
@@ -38,9 +41,9 @@ class GraphClient:
         self._sleep = sleep
         self._log = log
 
-    def _request(self, method: str, url: str, *, json=None, expect=(200,)):
+    def _request(self, method: str, url: str, *, json=None, expect=(200,), extra_headers=None):
         for attempt in range(MAX_RETRIES + 1):
-            headers = {"Authorization": f"Bearer {self._token()}"}
+            headers = {**(extra_headers or {}), "Authorization": f"Bearer {self._token()}"}
             try:
                 resp = self._session.request(method, url, headers=headers, json=json, timeout=TIMEOUT)
             except requests.RequestException as exc:
@@ -86,7 +89,8 @@ class GraphClient:
     def _walk(self, url: str) -> tuple:
         messages = []
         while True:
-            data = self._request("GET", url).json()
+            # the header goes on every page request, including nextLink/deltaLink follow-ups
+            data = self._request("GET", url, extra_headers=DELTA_HEADERS).json()
             for item in data.get("value", []):
                 if "@removed" in item:
                     continue
