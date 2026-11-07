@@ -21,6 +21,7 @@ chmod 777 "$state" "$state_other" "$state_ui" "$state_ui/logs" # any non-root ui
 cfg_example="$work/cfg-example"
 cfg_offline="$work/cfg-offline"
 mkdir "$cfg_example" "$cfg_offline"
+chmod 777 "$cfg_example" "$cfg_offline" # /config is writable too (the review page adds allowlist entries)
 cp config/local.cf.example "$cfg_example/local.cf"
 # same rules, but no DNS: the scoring test must not depend on the network
 cp config/local.cf.example "$cfg_offline/local.cf"
