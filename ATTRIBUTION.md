@@ -19,7 +19,7 @@ Python packages below. The licenses were read from the sources named in each ent
 
 - **msal** 1.39.0: https://github.com/AzureAD/microsoft-authentication-library-for-python
   - **License:** MIT (Microsoft Corporation). Read from the package metadata.
-  - **How it's used:** library dependency; signs in to the personal Microsoft accounts (device code flow) and
+  - **How it's used:** library dependency; signs in to the personal Microsoft mailbox (device code flow) and
     refreshes tokens. Installed with `pip`, not modified or vendored.
 - **requests** 2.34.2: https://github.com/psf/requests
   - **License:** Apache-2.0 (Kenneth Reitz and contributors). Read from the package metadata.

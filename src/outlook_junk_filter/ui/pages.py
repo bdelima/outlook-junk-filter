@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from . import actions as actions_module
 from .logreader import PER_PAGE
 
-CSV_COLUMNS = ("time", "account", "sender", "subject", "score", "decision", "reason")
+CSV_COLUMNS = ("time", "sender", "subject", "score", "decision", "reason")
 DECISIONS = ("keep", "would-delete", "would-quarantine", "quarantined", "deleted", "permanently-deleted", "error")
 
 
@@ -68,7 +68,6 @@ def _score(value) -> str:
 def decisions_page(page, params: dict, info: dict) -> str:
     form = (
         '<form method="get" action="/" class="filters">'
-        f'<label>Account <select name="account">{_options(("", "live", "outlook"), params.get("account", ""))}</select></label> '
         f'<label>Decision <select name="decision">{_options(("",) + DECISIONS, params.get("decision", ""))}</select></label> '
         f'<label>From <input type="date" name="date_from" value="{esc(params.get("date_from", ""))}"></label> '
         f'<label>To <input type="date" name="date_to" value="{esc(params.get("date_to", ""))}"></label> '
@@ -81,11 +80,10 @@ def decisions_page(page, params: dict, info: dict) -> str:
     )
     rows = []
     for record in page.rows:
-        detail = {"account": record.get("account", ""), "id": record.get("message_id", ""), "ts": record.get("ts", "")}
+        detail = {"id": record.get("message_id", ""), "ts": record.get("ts", "")}
         rows.append(
             "<tr>"
             f"<td>{link('/message', detail, record.get('ts', ''))}</td>"
-            f"<td>{esc(record.get('account'))}</td>"
             f"<td>{esc(record.get('from_addr'))}</td>"
             f"<td>{esc(record.get('subject'))}</td>"
             f"<td class=\"num\">{esc(_score(record.get('score')))}</td>"
@@ -93,9 +91,9 @@ def decisions_page(page, params: dict, info: dict) -> str:
             f"<td>{esc(record.get('reason'))}</td></tr>"
         )
     table = (
-        "<table><thead><tr><th>Time</th><th>Account</th><th>Sender</th><th>Subject</th><th>Score</th>"
+        "<table><thead><tr><th>Time</th><th>Sender</th><th>Subject</th><th>Score</th>"
         "<th>Decision</th><th>Reason</th></tr></thead><tbody>"
-        + ("".join(rows) or '<tr><td colspan="7">No decisions to show.</td></tr>')
+        + ("".join(rows) or '<tr><td colspan="6">No decisions to show.</td></tr>')
         + "</tbody></table>"
     )
     current = int(params.get("page", "1") or 1)
@@ -120,7 +118,7 @@ def _options(values, selected) -> str:
 
 def message_page(record: dict, info: dict, quarantine_folder: str = "") -> str:
     fields = [
-        "ts", "account", "message_id", "internet_message_id", "received", "from_addr", "subject", "score",
+        "ts", "message_id", "internet_message_id", "received", "from_addr", "subject", "score",
         "keep_rule_hit", "relays_untrusted", "first_untrusted_ip", "auth_results_present", "mode", "decision",
         "reason", "action_error", "current_message_id", "folder",
     ]
@@ -133,7 +131,7 @@ def message_page(record: dict, info: dict, quarantine_folder: str = "") -> str:
 
 
 def _actions_block(record: dict) -> str:
-    base = {"account": record.get("account", ""), "id": record.get("message_id", ""), "ts": record.get("ts", "")}
+    base = {"id": record.get("message_id", ""), "ts": record.get("ts", "")}
     out = ["<h2>Actions</h2>"]
     if not actions_module.can_teach(record):
         out.append("<p>This message is gone from Outlook (permanently deleted), so this row is view-only for teaching and restoring.</p>")
@@ -174,14 +172,13 @@ ACTION_TEXT = {
 
 
 def confirm_page(action: str, record: dict, token: str, info: dict) -> str:
-    fields = {"account": record.get("account", ""), "id": record.get("message_id", ""), "ts": record.get("ts", ""),
-              "action": action, "token": token}
+    fields = {"id": record.get("message_id", ""), "ts": record.get("ts", ""), "action": action, "token": token}
     hidden = "".join(f'<input type="hidden" name="{esc(k)}" value="{esc(v)}">' for k, v in fields.items())
     body = (
         f"<p>{esc(ACTION_TEXT.get(action, action))}?</p>"
         f"<p>From {esc(record.get('from_addr'))}, subject {esc(record.get('subject'))}.</p>"
         f'<form method="post" action="/act">{hidden}<button type="submit">Confirm</button></form>'
-        + link("/message", {"account": fields["account"], "id": fields["id"], "ts": fields["ts"]}, "Cancel")
+        + link("/message", {"id": fields["id"], "ts": fields["ts"]}, "Cancel")
     )
     return layout("Confirm", body, header_block(info))
 
@@ -201,7 +198,6 @@ def summary_page(data: dict, info: dict) -> str:
     hist = "".join(f"<tr><td>{esc(b)}</td><td>{esc(n)}</td></tr>" for b, n in data["histogram"].items())
     body = (
         counts_table("Per day", data["per_day"])
-        + counts_table("Per account", data["per_account"])
         + "<h2>Score histogram</h2><table><thead><tr><th>Score (whole-number bucket)</th><th>Messages</th></tr></thead>"
         f"<tbody>{hist or '<tr><td colspan=2>nothing yet</td></tr>'}</tbody></table>"
     )
@@ -250,7 +246,6 @@ def csv_rows(records):
         writer.writerow(
             [
                 csv_cell(record.get("ts")),
-                csv_cell(record.get("account")),
                 csv_cell(record.get("from_addr")),
                 csv_cell(record.get("subject")),
                 csv_cell(_score(record.get("score"))),

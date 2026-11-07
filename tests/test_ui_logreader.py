@@ -9,7 +9,7 @@ from outlook_junk_filter.ui.logreader import Filters
 
 def rec(n, **kw):
     base = {
-        "ts": f"2026-11-0{1 + n % 9}T10:00:{n % 60:02d}Z", "account": "live" if n % 2 else "outlook",
+        "ts": f"2026-11-0{1 + n % 9}T10:00:{n % 60:02d}Z",
         "message_id": f"M{n}", "internet_message_id": f"<{n}@x.invalid>", "received": "2026-11-01T00:00:00Z",
         "from_addr": f"sender{n}@example.invalid", "subject": f"subject {n}", "score": float(n), "rules": ["A"],
         "keep_rule_hit": False, "relays_untrusted": "", "first_untrusted_ip": "", "auth_results_present": True,
@@ -62,7 +62,6 @@ def test_filters(tmp_path):
         return sorted(r["message_id"] for r in logreader.query(tmp_path, Filters(**kw)).rows)
 
     assert ids(decision="deleted") == ["M1"]
-    assert ids(account="live") == ["M1", "M3"]
     assert ids(score_min=5.0) == ["M1", "M3"]
     assert ids(score_min=2.0, score_max=10.0) == ["M3"]
     assert ids(q="newsletter") == ["M2"]  # subject, case-insensitive
@@ -92,20 +91,20 @@ def test_records_without_a_score_sort_last(tmp_path):
 
 def test_find_and_header(tmp_path):
     write(tmp_path, "decisions.jsonl", [rec(1, ts="2026-11-01T00:00:00Z"), rec(2, ts="2026-11-02T00:00:00Z")])
-    assert logreader.find(tmp_path, "live", "M1", "2026-11-01T00:00:00Z")["subject"] == "subject 1"
-    assert logreader.find(tmp_path, "live", "M2", "2026-11-02T00:00:00Z") is None  # wrong account
+    assert logreader.find(tmp_path, "M1", "2026-11-01T00:00:00Z")["subject"] == "subject 1"
+    assert logreader.find(tmp_path, "M2", "2026-11-01T00:00:00Z") is None  # right id, wrong time
     info = logreader.header(tmp_path)
     assert (info["records"], info["oldest"], info["newest"]) == (2, "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z")
 
 
-def test_summary_counts_per_day_per_account_and_a_histogram(tmp_path):
+def test_summary_counts_per_day_and_a_histogram(tmp_path):
     write(tmp_path, "decisions.jsonl", [
         rec(1, ts="2026-11-01T00:00:00Z", score=0.5), rec(3, ts="2026-11-01T00:00:00Z", score=1.2, decision="deleted"),
         rec(2, ts="2026-11-02T00:00:00Z", score=-0.5), rec(4, ts="2026-11-02T00:00:00Z", score=None, decision="error"),
     ])
     data = logreader.summary(tmp_path)
     assert data["per_day"]["2026-11-01"] == {"keep": 1, "deleted": 1}
-    assert data["per_account"]["live"] == {"keep": 1, "deleted": 1}
+    assert "per_account" not in data
     assert data["histogram"] == {-1: 1, 0: 1, 1: 1}
 
 
@@ -125,7 +124,7 @@ def test_viewing_opens_nothing_outside_the_log_directory(tmp_path, monkeypatch):
     log_dir = tmp_path / "logs"
     write(log_dir, "decisions.jsonl", [rec(1)])
     (tmp_path / "tokens").mkdir()
-    (tmp_path / "tokens" / "live.json").write_text("SECRET", encoding="utf-8")
+    (tmp_path / "tokens" / "token.json").write_text("SECRET", encoding="utf-8")
     opened = []
     real_open = open
 

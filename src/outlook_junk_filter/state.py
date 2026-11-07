@@ -1,4 +1,4 @@
-"""Per-account state under /state/delta/<account>.json.
+"""State under /state/delta/state.json.
 
 Holds the delta link, the retry list and the handled internetMessageIds
 (entries older than 90 days are dropped).
@@ -23,9 +23,9 @@ def _iso(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-class AccountState:
-    def __init__(self, account: str, state_dir: Path, clock=now):
-        self.path = Path(state_dir) / "delta" / f"{account}.json"
+class State:
+    def __init__(self, state_dir: Path, clock=now):
+        self.path = Path(state_dir) / "delta" / "state.json"
         self._clock = clock
         self.delta_link: str | None = None
         self.retry: dict = {}  # graph message id -> {"attempts": n, "message": {...}, "reason": str}

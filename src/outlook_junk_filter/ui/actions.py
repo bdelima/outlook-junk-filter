@@ -14,7 +14,6 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..config import ACCOUNTS
 from ..graph import GraphError, NetworkError
 
 ALLOWLIST_FILE = "ojf-allowlist.cf"
@@ -42,8 +41,8 @@ def can_restore(record: dict) -> bool:
 
 
 class Actions:
-    def __init__(self, graph_for, restored, state_dir: Path, config_dir: Path, run=subprocess.run, now=None):
-        self._graph_for = graph_for
+    def __init__(self, graph, restored, state_dir: Path, config_dir: Path, run=subprocess.run, now=None):
+        self._graph = graph
         self._restored = restored
         self._state = Path(state_dir)
         self._config = Path(config_dir)
@@ -54,12 +53,11 @@ class Actions:
 
     # ------------------------------------------------------------------ the actions log
 
-    def _record(self, action: str, account: str, message_id: str, target: str) -> None:
+    def _record(self, action: str, message_id: str, target: str) -> None:
         line = json.dumps(
             {
                 "ts": self._now().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "action": action,
-                "account": account,
                 "message_id": message_id,
                 "target": target,
             },
@@ -72,21 +70,14 @@ class Actions:
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
 
-    @staticmethod
-    def _account(account: str) -> str:
-        if account not in ACCOUNTS:
-            raise ActionError("Unknown account.")
-        return account
-
     # ------------------------------------------------------------------ teach Bayes
 
-    def teach(self, account: str, record: dict, spam: bool) -> str:
-        account = self._account(account)
+    def teach(self, record: dict, spam: bool) -> str:
         if not can_teach(record):
             raise ActionError("That message is no longer in Outlook (it was permanently deleted), so it cannot be taught.")
         message_id = record["current_message_id"]
         try:
-            raw = self._graph_for(account).raw(message_id)
+            raw = self._graph.raw(message_id)
         except GraphError as exc:
             if exc.status == 404:
                 raise ActionError("That message is no longer in Outlook, so it cannot be taught.") from exc
@@ -108,14 +99,13 @@ class Actions:
             detail = (proc.stderr or b"").decode("utf-8", "replace").strip()[-200:]
             raise ActionError(f"sa-learn failed: {detail or 'exit ' + str(proc.returncode)}")
         label = "spam" if spam else "not-spam"
-        self._record(f"teach-{label}", account, message_id, label)
+        self._record(f"teach-{label}", message_id, label)
         return f"Taught Bayes: {label}."
 
     # ------------------------------------------------------------------ allowlist
 
-    def allowlist(self, account: str, kind: str, from_addr: str) -> str:
+    def allowlist(self, kind: str, from_addr: str) -> str:
         """Add a sender address or its domain as a whitelist_auth line (SPF or DKIM must pass for it to count)."""
-        account = self._account(account)
         address = (from_addr or "").strip().lower()
         if not _ADDRESS.match(address):
             raise ActionError("That sender address cannot be allowlisted (it is not a plain address).")
@@ -144,20 +134,19 @@ class Actions:
                     os.replace(tmp, path)
                 except OSError as exc:
                     raise ActionError("Could not write the allowlist file (is /config writable?).") from exc
-        self._record("allowlist", account, "", entry)
+        self._record("allowlist", "", entry)
         return f"Allowlisted {entry}. It takes effect on the next scoring pass."
 
     # ------------------------------------------------------------------ restore
 
-    def restore(self, account: str, record: dict, destination: str) -> str:
-        account = self._account(account)
+    def restore(self, record: dict, destination: str) -> str:
         if destination not in DESTINATIONS:
             raise ActionError("Choose Junk or Inbox.")
         if not can_restore(record):
             raise ActionError("Only a message in the quarantine folder or Deleted Items can be restored.")
         message_id = record["current_message_id"]
         try:
-            self._graph_for(account).move(message_id, DESTINATIONS[destination])
+            self._graph.move(message_id, DESTINATIONS[destination])
         except GraphError as exc:
             if exc.status == 404:
                 raise ActionError("That message is no longer in Outlook, so it cannot be restored.") from exc
@@ -166,5 +155,5 @@ class Actions:
             raise ActionError("Could not reach Microsoft Graph.") from exc
         # the job must not rescore it and move it straight back
         self._restored.add(record.get("internet_message_id") or "")
-        self._record("restore", account, message_id, destination)
+        self._record("restore", message_id, destination)
         return f"Restored to {destination.capitalize()}. The job will keep it."

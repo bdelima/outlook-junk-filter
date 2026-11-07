@@ -3,6 +3,8 @@
 Rules (from the build spec): an empty value counts as unset; invalid values never
 cause deletion; an unrecognized mode is report-only; a mode of ``act`` that lacks a valid
 delete mode or any usable threshold behaves as report-only.
+
+One instance runs exactly one mailbox, so there is one mode (``OJF_MODE``).
 """
 
 from __future__ import annotations
@@ -13,7 +15,6 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ACCOUNTS = ("live", "outlook")
 MODES = ("report-only", "act")
 DELETE_MODES = ("deleted-items", "permanent")
 DEFAULT_INTERVAL = 900
@@ -58,7 +59,7 @@ class Config:
     state_dir: Path = Path("/state")
     config_dir: Path = Path("/config")
     interval: int = DEFAULT_INTERVAL
-    modes: dict = field(default_factory=dict)  # account -> report-only | act (as configured, valid)
+    mode: str = "report-only"  # report-only | act, as configured (a valid value)
     delete_mode: str | None = None
     delete_threshold: float | None = None
     keep_pattern: re.Pattern = field(default_factory=lambda: re.compile(DEFAULT_KEEP_PATTERN))
@@ -71,7 +72,7 @@ class Config:
     version: str = "dev"
     # problems found while parsing; logged at startup and on every run
     problems: list = field(default_factory=list)
-    # why an account configured for act would behave as report-only
+    # why a mode of act would behave as report-only
     act_problems: list = field(default_factory=list)
 
     @property
@@ -79,16 +80,16 @@ class Config:
         """Quarantine is on and has a threshold to act on."""
         return self.quarantine_enabled and self.quarantine_threshold is not None
 
-    def effective_mode(self, account: str) -> str:
-        """The mode the account really runs in: act only if everything act needs is valid."""
-        if self.modes.get(account) == "act" and not self.act_problems:
+    def effective_mode(self) -> str:
+        """The mode the job really runs in: act only if everything act needs is valid."""
+        if self.mode == "act" and not self.act_problems:
             return "act"
         return "report-only"
 
-    def run_problems(self, account: str) -> list:
-        """Errors to log on every run for this account."""
+    def run_problems(self) -> list:
+        """Errors to log on every run."""
         out = list(self.problems)
-        if self.modes.get(account) == "act":
+        if self.mode == "act":
             out.extend(self.act_problems)
         return out
 
@@ -97,8 +98,7 @@ class Config:
         return {
             "client_id": self.client_id,
             "interval_seconds": self.interval,
-            "mode_live": self.effective_mode("live"),
-            "mode_outlook": self.effective_mode("outlook"),
+            "mode": self.effective_mode(),
             "delete_mode": self.delete_mode,
             "delete_threshold": self.delete_threshold,
             "quarantine_enabled": self.quarantine_enabled,
@@ -132,17 +132,13 @@ def load(env=None) -> Config:
             problems.append(f"OJF_INTERVAL_SECONDS={interval} is below {MIN_INTERVAL}; using {MIN_INTERVAL}")
             interval = MIN_INTERVAL
 
-    modes = {}
-    for account in ACCOUNTS:
-        name = f"OJF_MODE_{account.upper()}"
-        raw = _get(env, name)
-        if raw is None:
-            modes[account] = "report-only"
-        elif raw.lower() in MODES:
-            modes[account] = raw.lower()
+    mode = "report-only"
+    raw = _get(env, "OJF_MODE")
+    if raw is not None:
+        if raw.lower() in MODES:
+            mode = raw.lower()
         else:
-            problems.append(f"{name}={raw!r} is not report-only or act; treating as report-only")
-            modes[account] = "report-only"
+            problems.append(f"OJF_MODE={raw!r} is not report-only or act; treating as report-only")
 
     # --- quarantine ---------------------------------------------------------
     quarantine_enabled = True
@@ -219,7 +215,7 @@ def load(env=None) -> Config:
         act_problems.append(
             f"OJF_QUARANTINE_THRESHOLD={quarantine_threshold} must be lower than OJF_DELETE_THRESHOLD={delete_threshold}"
         )
-    act_problems = [f"{p}; accounts in act mode behave as report-only" for p in act_problems]
+    act_problems = [f"{p}; a mode of act behaves as report-only" for p in act_problems]
 
     keep_pattern = re.compile(DEFAULT_KEEP_PATTERN)
     raw = _get(env, "OJF_KEEP_RULE_PATTERN")
@@ -232,7 +228,7 @@ def load(env=None) -> Config:
     return Config(
         client_id=client_id,
         interval=interval,
-        modes=modes,
+        mode=mode,
         delete_mode=delete_mode,
         delete_threshold=delete_threshold,
         keep_pattern=keep_pattern,

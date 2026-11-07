@@ -2,17 +2,17 @@
 
 from conftest import FakeDecisions, FakeGraph, make_config, msg, scorer
 from outlook_junk_filter.graph import GraphError, NetworkError
-from outlook_junk_filter.runner import AccountRunner
+from outlook_junk_filter.runner import Runner
 from outlook_junk_filter.scoring import ScoreError
 
 
-def run(cfg, graph, state, log, score_fn, account="live"):
+def run(cfg, graph, state, log, score_fn):
     decisions = FakeDecisions()
-    summary = AccountRunner(account, cfg, graph, state, decisions, log, score_fn).run()
+    summary = Runner(cfg, graph, state, decisions, log, score_fn).run()
     return summary, decisions.records
 
 
-ACT = {"OJF_MODE_LIVE": "act", "OJF_DELETE_MODE": "deleted-items", "OJF_DELETE_THRESHOLD": "10"}
+ACT = {"OJF_MODE": "act", "OJF_DELETE_MODE": "deleted-items", "OJF_DELETE_THRESHOLD": "10"}
 
 
 def test_report_only_high_score_is_would_delete_and_makes_no_call(state, log):
@@ -41,11 +41,11 @@ def test_act_permanent_uses_permanent_delete_and_no_move(state, log):
 
 def test_act_with_missing_or_invalid_settings_behaves_as_report_only(state, log, caplog):
     for env in (
-        {"OJF_MODE_LIVE": "act", "OJF_DELETE_THRESHOLD": "10"},  # no delete mode
-        {"OJF_MODE_LIVE": "act", "OJF_DELETE_MODE": "deleted-items"},  # no threshold
-        {"OJF_MODE_LIVE": "act", "OJF_DELETE_MODE": "shred", "OJF_DELETE_THRESHOLD": "10"},
-        {"OJF_MODE_LIVE": "act", "OJF_DELETE_MODE": "permanent", "OJF_DELETE_THRESHOLD": "lots"},
-        {"OJF_MODE_LIVE": "act", "OJF_DELETE_MODE": "permanent", "OJF_DELETE_THRESHOLD": "nan"},
+        {"OJF_MODE": "act", "OJF_DELETE_THRESHOLD": "10"},  # no delete mode
+        {"OJF_MODE": "act", "OJF_DELETE_MODE": "deleted-items"},  # no threshold
+        {"OJF_MODE": "act", "OJF_DELETE_MODE": "shred", "OJF_DELETE_THRESHOLD": "10"},
+        {"OJF_MODE": "act", "OJF_DELETE_MODE": "permanent", "OJF_DELETE_THRESHOLD": "lots"},
+        {"OJF_MODE": "act", "OJF_DELETE_MODE": "permanent", "OJF_DELETE_THRESHOLD": "nan"},
     ):
         state.handled.clear()
         caplog.clear()
@@ -60,7 +60,7 @@ def test_act_with_missing_or_invalid_settings_behaves_as_report_only(state, log,
 
 
 def test_unrecognised_mode_is_report_only_and_logged(state, log, caplog):
-    cfg = make_config(OJF_MODE_LIVE="yes-please", OJF_DELETE_MODE="permanent", OJF_DELETE_THRESHOLD="1")
+    cfg = make_config(OJF_MODE="yes-please", OJF_DELETE_MODE="permanent", OJF_DELETE_THRESHOLD="1")
     graph = FakeGraph([msg(1)])
     with caplog.at_level("ERROR", logger="ojf-test"):
         run(cfg, graph, state, log, scorer([99.0]))
@@ -172,7 +172,7 @@ def test_records_carry_the_documented_fields_and_cut_subjects(state, log):
     _, records = run(cfg, graph, state, log, scorer([3.0]))
     record = records[0]
     assert set(record) == {
-        "ts", "account", "message_id", "internet_message_id", "received", "from_addr", "subject",
+        "ts", "message_id", "internet_message_id", "received", "from_addr", "subject",
         "score", "rules", "keep_rule_hit", "relays_untrusted", "first_untrusted_ip",
         "auth_results_present", "mode", "decision", "reason", "action_error", "current_message_id", "folder",
     }
@@ -214,7 +214,7 @@ def test_a_restored_message_is_kept_with_reason_restored_and_not_rescored(state,
     cfg = make_config(**ACT)
     graph = FakeGraph([msg(1), msg(2)])
     decisions = FakeDecisions()
-    AccountRunner("live", cfg, graph, state, decisions, log, scorer([50.0]), restored=restored).run()
+    Runner(cfg, graph, state, decisions, log, scorer([50.0]), restored=restored).run()
     assert [(r["message_id"], r["decision"], r["reason"]) for r in decisions.records] == [
         ("AAA1", "keep", "restored"),
         ("AAA2", "deleted", "score at or above the delete threshold"),

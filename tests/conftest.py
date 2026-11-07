@@ -9,7 +9,7 @@ import pytest
 from outlook_junk_filter import config as config_module
 from outlook_junk_filter.graph import GraphError
 from outlook_junk_filter.scoring import ScoreResult
-from outlook_junk_filter.state import AccountState
+from outlook_junk_filter.state import State
 
 
 def make_config(**env):
@@ -128,4 +128,4 @@ def log():
 
 @pytest.fixture
 def state(tmp_path):
-    return AccountState("live", tmp_path)
+    return State(tmp_path)

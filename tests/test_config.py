@@ -19,7 +19,7 @@ def test_client_id_is_required_and_empty_counts_as_unset():
 def test_defaults():
     cfg = load()
     assert cfg.interval == 900
-    assert cfg.effective_mode("live") == cfg.effective_mode("outlook") == "report-only"
+    assert cfg.effective_mode() == "report-only"
     assert cfg.delete_mode is None and cfg.delete_threshold is None and cfg.quarantine_threshold is None
     assert cfg.quarantine_enabled is True and cfg.quarantine_folder == "Quarantined" and cfg.quarantine_retention_days == 7
     assert cfg.keep_pattern.pattern == r"^USER_IN_.*(WHITE|WELCOME)LIST"
@@ -39,24 +39,25 @@ def test_bad_interval_falls_back_to_default():
 
 
 def test_empty_values_count_as_unset():
-    cfg = load(OJF_MODE_LIVE="", OJF_DELETE_MODE="", OJF_DELETE_THRESHOLD="", OJF_QUARANTINE_THRESHOLD="", OJF_QUARANTINE_FOLDER="", OJF_INTERVAL_SECONDS="")
+    cfg = load(OJF_MODE="", OJF_DELETE_MODE="", OJF_DELETE_THRESHOLD="", OJF_QUARANTINE_THRESHOLD="", OJF_QUARANTINE_FOLDER="", OJF_INTERVAL_SECONDS="")
     assert cfg.interval == 900 and cfg.quarantine_folder == "Quarantined"
     assert cfg.problems == []
 
 
 def test_act_needs_valid_delete_settings():
-    ok = load(OJF_MODE_LIVE="act", OJF_DELETE_MODE="permanent", OJF_DELETE_THRESHOLD="12.5")
-    assert ok.effective_mode("live") == "act" and ok.effective_mode("outlook") == "report-only"
+    ok = load(OJF_MODE="act", OJF_DELETE_MODE="permanent", OJF_DELETE_THRESHOLD="12.5")
+    assert ok.effective_mode() == "act"
     assert ok.delete_threshold == 12.5
-    bad = load(OJF_MODE_LIVE="act", OJF_DELETE_MODE="permanent")
-    assert bad.effective_mode("live") == "report-only"
-    assert bad.run_problems("live") and not bad.run_problems("outlook")
+    bad = load(OJF_MODE="act", OJF_DELETE_MODE="permanent")
+    assert bad.effective_mode() == "report-only"
+    assert bad.run_problems()
+    assert not load(OJF_DELETE_MODE="permanent").run_problems()  # report-only: act problems are not reported
 
 
 def test_modes_are_case_insensitive_and_unknown_is_report_only():
-    assert load(OJF_MODE_OUTLOOK="ACT", OJF_DELETE_MODE="deleted-items", OJF_DELETE_THRESHOLD="1").effective_mode("outlook") == "act"
-    cfg = load(OJF_MODE_OUTLOOK="delete-everything")
-    assert cfg.effective_mode("outlook") == "report-only" and cfg.problems
+    assert load(OJF_MODE="ACT", OJF_DELETE_MODE="deleted-items", OJF_DELETE_THRESHOLD="1").effective_mode() == "act"
+    cfg = load(OJF_MODE="delete-everything")
+    assert cfg.effective_mode() == "report-only" and cfg.problems
 
 
 def test_invalid_pattern_is_ignored_not_fatal():
@@ -76,32 +77,32 @@ def test_describe_has_no_secrets_fields():
     assert "token" not in text and "password" not in text
 
 
-ACT = {"OJF_MODE_LIVE": "act", "OJF_DELETE_MODE": "deleted-items"}
+ACT = {"OJF_MODE": "act", "OJF_DELETE_MODE": "deleted-items"}
 
 
 def test_act_with_only_a_quarantine_threshold_is_valid():
     cfg = load(**ACT, OJF_QUARANTINE_THRESHOLD="6")
-    assert cfg.effective_mode("live") == "act" and cfg.delete_threshold is None and cfg.quarantine_active
+    assert cfg.effective_mode() == "act" and cfg.delete_threshold is None and cfg.quarantine_active
 
 
 def test_act_needs_some_threshold_and_a_delete_mode():
-    assert load(**ACT).effective_mode("live") == "report-only"  # neither threshold
-    assert load(OJF_MODE_LIVE="act", OJF_QUARANTINE_THRESHOLD="6").effective_mode("live") == "report-only"  # no delete mode
+    assert load(**ACT).effective_mode() == "report-only"  # neither threshold
+    assert load(OJF_MODE="act", OJF_QUARANTINE_THRESHOLD="6").effective_mode() == "report-only"  # no delete mode
     # a quarantine threshold counts only while quarantine is on
     off = load(**ACT, OJF_QUARANTINE_THRESHOLD="6", OJF_QUARANTINE_ENABLED="off")
-    assert off.effective_mode("live") == "report-only" and not off.quarantine_active
+    assert off.effective_mode() == "report-only" and not off.quarantine_active
 
 
 def test_quarantine_threshold_must_be_lower_than_the_delete_threshold():
     for q, d in (("10", "10"), ("12", "10")):
         cfg = load(**ACT, OJF_QUARANTINE_THRESHOLD=q, OJF_DELETE_THRESHOLD=d)
-        assert cfg.effective_mode("live") == "report-only"
-        assert any("lower than" in p for p in cfg.run_problems("live"))
+        assert cfg.effective_mode() == "report-only"
+        assert any("lower than" in p for p in cfg.run_problems())
     ok = load(**ACT, OJF_QUARANTINE_THRESHOLD="6", OJF_DELETE_THRESHOLD="10")
-    assert ok.effective_mode("live") == "act"
+    assert ok.effective_mode() == "act"
     # when quarantine is off the two thresholds are not compared
     off = load(**ACT, OJF_QUARANTINE_THRESHOLD="12", OJF_DELETE_THRESHOLD="10", OJF_QUARANTINE_ENABLED="off")
-    assert off.effective_mode("live") == "act"
+    assert off.effective_mode() == "act"
 
 
 def test_quarantine_settings():
@@ -125,3 +126,8 @@ def test_csrf_check_is_off_by_default_and_configurable():
     assert load(OJF_UI_CSRF="off").ui_csrf is False
     bad = load(OJF_UI_CSRF="maybe")
     assert bad.ui_csrf is False and any("OJF_UI_CSRF" in p for p in bad.problems)
+
+
+def test_the_old_per_account_variables_are_ignored():
+    cfg = load(OJF_MODE_LIVE="act", OJF_MODE_OUTLOOK="act", OJF_DELETE_MODE="permanent", OJF_DELETE_THRESHOLD="10")
+    assert cfg.effective_mode() == "report-only" and cfg.problems == []

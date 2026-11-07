@@ -5,18 +5,18 @@ from datetime import datetime, timedelta, timezone
 
 from outlook_junk_filter import healthcheck
 from outlook_junk_filter.logs import DecisionLog, histogram, touch_health
-from outlook_junk_filter.state import AccountState
+from outlook_junk_filter.state import State
 
 
 def test_state_round_trip_and_90_day_pruning(tmp_path):
     now = datetime(2026, 11, 7, tzinfo=timezone.utc)
-    st = AccountState("live", tmp_path, clock=lambda: now)
+    st = State(tmp_path, clock=lambda: now)
     st.delta_link = "D"
     st.handled["<new@x>"] = "2026-11-01T00:00:00Z"
     st.handled["<old@x>"] = (now - timedelta(days=91)).strftime("%Y-%m-%dT%H:%M:%SZ")
     st.add_retry({"id": "1"}, "scoring failed")
     st.save()
-    again = AccountState("live", tmp_path, clock=lambda: now)
+    again = State(tmp_path, clock=lambda: now)
     assert again.delta_link == "D"
     assert "<new@x>" in again.handled and "<old@x>" not in again.handled
     assert again.retry["1"]["attempts"] == 1
@@ -25,12 +25,12 @@ def test_state_round_trip_and_90_day_pruning(tmp_path):
 def test_corrupt_state_file_starts_clean(tmp_path):
     path = tmp_path / "delta"
     path.mkdir()
-    (path / "live.json").write_text("{not json", encoding="utf-8")
-    assert AccountState("live", tmp_path).delta_link is None
+    (path / "state.json").write_text("{not json", encoding="utf-8")
+    assert State(tmp_path).delta_link is None
 
 
 def test_messages_without_internet_id_are_keyed_by_graph_id(tmp_path):
-    st = AccountState("live", tmp_path)
+    st = State(tmp_path)
     st.mark_handled({"id": "abc"})
     assert st.is_handled({"id": "abc"}) and not st.is_handled({"id": "other"})
 

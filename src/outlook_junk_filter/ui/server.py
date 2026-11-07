@@ -33,7 +33,6 @@ def _float(value: str):
 
 def filters_from(params: dict) -> logreader.Filters:
     return logreader.Filters(
-        account=params.get("account", ""),
         decision=params.get("decision", ""),
         date_from=params.get("date_from", ""),
         date_to=params.get("date_to", ""),
@@ -121,7 +120,7 @@ def make_handler(ctx: Context):
             self._html(pages.decisions_page(page, view, logreader.header(ctx.log_dir)))
 
         def _record(self, params):
-            return logreader.find(ctx.log_dir, params.get("account", ""), params.get("id", ""), params.get("ts", ""))
+            return logreader.find(ctx.log_dir, params.get("id", ""), params.get("ts", ""))
 
         def _message(self, params):
             record = self._record(params)
@@ -188,28 +187,28 @@ def make_handler(ctx: Context):
 
         def _act(self, form):
             info = logreader.header(ctx.log_dir)
-            back = pages.link("/message", {"account": form.get("account", ""), "id": form.get("id", ""), "ts": form.get("ts", "")}, "Back to the message")
-            record = logreader.find(ctx.log_dir, form.get("account", ""), form.get("id", ""), form.get("ts", ""))
+            back = pages.link("/message", {"id": form.get("id", ""), "ts": form.get("ts", "")}, "Back to the message")
+            record = logreader.find(ctx.log_dir, form.get("id", ""), form.get("ts", ""))
             if record is None:
                 self._html(pages.result_page("That record is not in the log.", False, back, info), 404)
                 return
             if ctx.actions is None:
                 self._html(pages.result_page("Actions are only available while the job is running.", False, back, info), 503)
                 return
-            action, account = form.get("action", ""), record.get("account", "")
+            action = form.get("action", "")
             try:
                 if action == "teach-spam":
-                    message = ctx.actions.teach(account, record, spam=True)
+                    message = ctx.actions.teach(record, spam=True)
                 elif action == "teach-ham":
-                    message = ctx.actions.teach(account, record, spam=False)
+                    message = ctx.actions.teach(record, spam=False)
                 elif action == "restore-junk":
-                    message = ctx.actions.restore(account, record, "junk")
+                    message = ctx.actions.restore(record, "junk")
                 elif action == "restore-inbox":
-                    message = ctx.actions.restore(account, record, "inbox")
+                    message = ctx.actions.restore(record, "inbox")
                 elif action == "allow-address":
-                    message = ctx.actions.allowlist(account, "address", record.get("from_addr", ""))
+                    message = ctx.actions.allowlist("address", record.get("from_addr", ""))
                 elif action == "allow-domain":
-                    message = ctx.actions.allowlist(account, "domain", record.get("from_addr", ""))
+                    message = ctx.actions.allowlist("domain", record.get("from_addr", ""))
                 else:
                     raise ActionError("Unknown action.")
             except ActionError as exc:
