@@ -10,6 +10,8 @@ IMAGE=${1:?usage: test-image.sh IMAGE}
 want=$(tr -d '[:space:]' < VERSION)
 
 work=$(mktemp -d)
+state_ui="$work/state-ui"
+ui_name="ojf-ui-test-$$"
 # the containers create files as other uids, so clean up from inside a container
 trap 'docker rm -f "$ui_name" >/dev/null 2>&1 || true; docker run --rm -v "$work:/w" --entrypoint sh "$IMAGE" -c "rm -rf /w/*" >/dev/null 2>&1 || true; rm -rf "$work" 2>/dev/null || true' EXIT
 state="$work/state"
@@ -17,8 +19,6 @@ state_other="$work/state-other"
 mkdir "$state" "$state_other" "$state_ui" "$state_ui/logs"
 chmod 777 "$state" "$state_other" "$state_ui" "$state_ui/logs" # any non-root uid must be able to write here, like the real bind mount
 cfg_example="$work/cfg-example"
-state_ui="$work/state-ui"
-ui_name="ojf-ui-test-$$"
 cfg_offline="$work/cfg-offline"
 mkdir "$cfg_example" "$cfg_offline"
 cp config/local.cf.example "$cfg_example/local.cf"
