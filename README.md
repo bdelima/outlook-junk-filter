@@ -153,7 +153,8 @@ rules stay in `/config/local.cf`, which loads after it and can override a score.
 fires only when two of three phrase groups match (subject, effect, pitch), so a health newsletter that mentions blood flow
 scores nothing. To switch it off, add `score OJF_ED_SPAM 0` to `/config/local.cf` (the image test checks this works).
 It also holds `OJF_WEIGHTLOSS_AD` (+2.5): weight-loss and GLP-1 advertising, counted only when Microsoft's own filter already
-rated the message SCL 5 or higher, because the topic alone is not spam. The phrase lists are hand-written and will need new
+rated the message SCL 5 or higher, because the topic alone is not spam. `OJF_JUNK_ADMITS_SPAM` (+1.5) needs no topic at all: Microsoft rated the message SCL 5 or higher and it admits to being
+an advertisement (SpamAssassin's stock `ADMITS_SPAM`). The phrase lists are hand-written and will need new
 entries as spammers change their wording.
 
 ### Safe Links

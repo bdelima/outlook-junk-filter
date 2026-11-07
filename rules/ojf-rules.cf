@@ -22,3 +22,9 @@ body     __OJF_WL_BODY     /\b(?:GLP-?1|semaglutide|tirzepatide|ozempic|wegovy|m
 meta     OJF_WEIGHTLOSS_AD __OJF_MS_SCL_5UP && (__OJF_WL_SUBJ || __OJF_WL_BODY)
 describe OJF_WEIGHTLOSS_AD Weight-loss or GLP-1 advertising that Microsoft already rated as spam
 score    OJF_WEIGHTLOSS_AD 2.5
+
+# Microsoft already filed it as junk (SCL 5 or higher) AND the message admits it is an advertisement (stock rule
+# ADMITS_SPAM, "this is an advertisement"). Independent of topic and subject, so it also covers the next campaign.
+meta     OJF_JUNK_ADMITS_SPAM __OJF_MS_SCL_5UP && ADMITS_SPAM
+describe OJF_JUNK_ADMITS_SPAM Microsoft rated it junk and it admits to being an advertisement
+score    OJF_JUNK_ADMITS_SPAM 1.5
