@@ -264,7 +264,16 @@ class AccountRunner:
             mode,
         )
 
+        first_walk = not self.state.delta_link
         messages, new_link = self.graph.delta(self.state.delta_link)
+        if first_walk and isinstance(folder_count, int) and len(messages) < folder_count:
+            self.log.warning(
+                "%s: the first delta walk returned %d messages but the Junk folder holds %d; "
+                "some messages may not be scored",
+                self.account,
+                len(messages),
+                folder_count,
+            )
 
         queue, seen = [], set()
         for entry in list(self.state.retry.values()):

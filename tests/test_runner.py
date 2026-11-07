@@ -189,6 +189,23 @@ def test_run_summary_has_counts_and_histogram(state, log):
     assert summary["folder_count"] == 3
 
 
+def test_a_short_first_walk_is_warned_about(state, log, caplog):
+    cfg = make_config()
+    graph = FakeGraph([msg(1), msg(2)], folder_count=570)
+    with caplog.at_level("WARNING", logger="ojf-test"):
+        run(cfg, graph, state, log, scorer([1.0, 2.0]))
+    assert any("returned 2 messages but the Junk folder holds 570" in r.getMessage() for r in caplog.records)
+
+
+def test_no_warning_when_the_walk_matches_the_folder_or_a_delta_link_is_saved(state, log, caplog):
+    cfg = make_config()
+    with caplog.at_level("WARNING", logger="ojf-test"):
+        run(cfg, FakeGraph([msg(1)], folder_count=1), state, log, scorer([1.0]))
+        state.delta_link = "SAVED"
+        run(cfg, FakeGraph([msg(2)], folder_count=570), state, log, scorer([1.0]))
+    assert not any("first delta walk" in r.getMessage() for r in caplog.records)
+
+
 def test_a_restored_message_is_kept_with_reason_restored_and_not_rescored(state, log, tmp_path):
     from outlook_junk_filter.restored import RestoredList
 
