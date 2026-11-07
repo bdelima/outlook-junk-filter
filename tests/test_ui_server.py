@@ -118,7 +118,7 @@ def test_unknown_message_and_page_are_404(web):
 def test_csv_export_neutralizes_formulas_and_follows_the_filters(web):
     status, headers, body = request(web, "GET", "/export.csv?decision=deleted")
     lines = body.strip().splitlines()
-    assert lines[0] == "time,sender,subject,score,decision,reason"
+    assert lines[0] == "time,sender,subject,score,ms_scl,decision,reason"
     assert len(lines) == 2
     assert "'=HYPERLINK" in lines[1] and "'-3.0" in lines[1]
     assert headers["Content-Disposition"].startswith("attachment")

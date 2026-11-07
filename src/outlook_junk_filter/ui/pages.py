@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from . import actions as actions_module
 from .logreader import PER_PAGE
 
-CSV_COLUMNS = ("time", "sender", "subject", "score", "decision", "reason")
+CSV_COLUMNS = ("time", "sender", "subject", "score", "ms_scl", "decision", "reason")
 DECISIONS = ("keep", "would-delete", "would-quarantine", "quarantined", "deleted", "permanently-deleted", "error")
 
 
@@ -87,13 +87,14 @@ def decisions_page(page, params: dict, info: dict) -> str:
             f"<td>{esc(record.get('from_addr'))}</td>"
             f"<td>{esc(record.get('subject'))}</td>"
             f"<td class=\"num\">{esc(_score(record.get('score')))}</td>"
+            f"<td class=\"num\">{esc(record.get('ms_scl') if record.get('ms_scl') is not None else '-')}</td>"
             f"<td>{esc(record.get('decision'))}</td>"
             f"<td>{esc(record.get('reason'))}</td></tr>"
         )
     table = (
-        "<table><thead><tr><th>Time</th><th>Sender</th><th>Subject</th><th>Score</th>"
+        "<table><thead><tr><th>Time</th><th>Sender</th><th>Subject</th><th>Score</th><th>MS SCL</th>"
         "<th>Decision</th><th>Reason</th></tr></thead><tbody>"
-        + ("".join(rows) or '<tr><td colspan="6">No decisions to show.</td></tr>')
+        + ("".join(rows) or '<tr><td colspan="7">No decisions to show.</td></tr>')
         + "</tbody></table>"
     )
     current = int(params.get("page", "1") or 1)
@@ -195,9 +196,17 @@ def summary_page(data: dict, info: dict) -> str:
         )
         return f"<h2>{esc(title)}</h2><table><tbody>{cells or '<tr><td>nothing yet</td></tr>'}</tbody></table>"
 
+    scl_rows = "".join(
+        f"<tr><td>{esc(level)}</td><td class=\"num\">{esc(n)}</td><td class=\"num\">{esc(f'{avg:.1f}')}</td>"
+        f"<td class=\"num\">{esc(f'{top:.1f}')}</td></tr>"
+        for level, (n, avg, top) in data.get("per_scl", {}).items()
+    )
     hist = "".join(f"<tr><td>{esc(b)}</td><td>{esc(n)}</td></tr>" for b, n in data["histogram"].items())
     body = (
         counts_table("Per day", data["per_day"])
+        + "<h2>Microsoft SCL (latest record per message)</h2><table><thead><tr><th>SCL</th><th>Messages</th>"
+        "<th>Average score</th><th>Highest score</th></tr></thead>"
+        f"<tbody>{scl_rows or '<tr><td colspan=4>nothing yet</td></tr>'}</tbody></table>"
         + "<h2>Score histogram</h2><table><thead><tr><th>Score (whole-number bucket)</th><th>Messages</th></tr></thead>"
         f"<tbody>{hist or '<tr><td colspan=2>nothing yet</td></tr>'}</tbody></table>"
     )
@@ -249,6 +258,7 @@ def csv_rows(records):
                 csv_cell(record.get("from_addr")),
                 csv_cell(record.get("subject")),
                 csv_cell(_score(record.get("score"))),
+                csv_cell("" if record.get("ms_scl") is None else record.get("ms_scl")),
                 csv_cell(record.get("decision")),
                 csv_cell(record.get("reason")),
             ]
