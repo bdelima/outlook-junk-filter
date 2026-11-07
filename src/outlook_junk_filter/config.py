@@ -23,6 +23,8 @@ DEFAULT_KEEP_PATTERN = r"^USER_IN_.*(WHITE|WELCOME)LIST"
 DEFAULT_QUARANTINE_FOLDER = "Quarantined"
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_UI_PORT = 60888
+# Microsoft's own spam verdict (SCL, 0-9; 5-6 spam, 7-9 high-confidence spam) -> points added to the score
+DEFAULT_SCL_POINTS = {7: 1.5, 8: 3.0, 9: 4.0}
 _TRUE = ("1", "true", "yes", "on")
 _FALSE = ("0", "false", "no", "off")
 
@@ -69,6 +71,7 @@ class Config:
     quarantine_retention_days: int = DEFAULT_RETENTION_DAYS
     ui_port: int = DEFAULT_UI_PORT
     ui_csrf: bool = False
+    scl_points: dict = field(default_factory=lambda: dict(DEFAULT_SCL_POINTS))  # SCL value -> points; empty = off
     version: str = "dev"
     # problems found while parsing; logged at startup and on every run
     problems: list = field(default_factory=list)
@@ -107,6 +110,7 @@ class Config:
             "quarantine_retention_days": self.quarantine_retention_days,
             "ui_port": self.ui_port,
             "ui_csrf": self.ui_csrf,
+            "ms_scl_points": self.scl_points,
             "keep_rule_pattern": self.keep_pattern.pattern,
             "version": self.version,
         }
@@ -187,6 +191,26 @@ def load(env=None) -> Config:
         else:
             problems.append(f"OJF_UI_CSRF={raw!r} is not on or off; using off")
 
+    scl_points = dict(DEFAULT_SCL_POINTS)
+    raw = _get(env, "OJF_MS_SCL_POINTS")
+    if raw is not None:
+        if raw.lower() in ("off", "none", "0"):
+            scl_points = {}
+        else:
+            try:
+                parsed = {}
+                for part in raw.split(","):
+                    level, _, points = part.partition("=")
+                    level, points = int(level.strip()), float(points.strip())
+                    if not 0 <= level <= 9 or not math.isfinite(points):
+                        raise ValueError
+                    parsed[level] = points
+                scl_points = parsed
+            except ValueError:
+                problems.append(
+                    f"OJF_MS_SCL_POINTS={raw!r} is not like 7=1.5,8=3,9=4 (or off); using the default"
+                )
+
     # --- thresholds and delete mode -----------------------------------------
     delete_mode = None
     delete_mode_problem = None
@@ -238,6 +262,7 @@ def load(env=None) -> Config:
         quarantine_retention_days=retention,
         ui_port=ui_port,
         ui_csrf=ui_csrf,
+        scl_points=scl_points,
         version=_get(env, "APP_VERSION") or "dev",
         problems=problems,
         act_problems=act_problems,

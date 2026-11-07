@@ -60,6 +60,7 @@ Add a stack with [`docker-compose.example.yml`](docker-compose.example.yml). The
 | `OJF_QUARANTINE_RETENTION_DAYS` | no | `7` | Days a message stays in the folder before the job deletes it. The age counts from the message's received time, so one already older than this is deleted on the next pass. |
 | `OJF_UI_PORT` | no | `60888` | Port of the review page (the stack publishes it). |
 | `OJF_UI_CSRF` | no | `off` | `on` makes the review page's actions require a per-process form token and refuse a request whose `Origin` is not the page's own host (the proxy must then pass `Host` through unchanged). Off by default: the page has no login and is meant for a private LAN. |
+| `OJF_MS_SCL_POINTS` | no | `7=1.5,8=3,9=4` | Points added to the score from Microsoft's own spam verdict, the `X-MS-Exchange-Organization-SCL` header (0-9; 5-6 spam, 7-9 high-confidence spam). A message Microsoft rates 8 gets +3 on top of SpamAssassin's score and is logged with the rule `OJF_MS_SCL_8`. `off` disables it. |
 | `OJF_KEEP_RULE_PATTERN` | no | `^USER_IN_.*(WHITE\|WELCOME)LIST` | Regular expression. A message that fired any matching rule is always kept. |
 | `TZ` | no | `UTC` | Timezone of log timestamps. |
 
@@ -150,7 +151,7 @@ To bring in newer SpamAssassin rules, update the stack with force-rebuild: rules
 - `decisions.jsonl` fields: `ts`, `message_id`, `internet_message_id`, `received`, `from_addr`, `subject`
   (cut to 120 characters), `score`, `rules`, `keep_rule_hit`, `relays_untrusted`, `first_untrusted_ip`,
   `auth_results_present`, `mode`, `decision` (`keep`, `would-delete`, `would-quarantine`, `quarantined`, `deleted`,
-  `permanently-deleted` or `error`), `reason`, `action_error`, and `current_message_id` and `folder` (where the message
+  `permanently-deleted` or `error`), `reason`, `action_error`, `ms_scl` (Microsoft's verdict, empty if the header is absent), and `current_message_id` and `folder` (where the message
   is now: Graph gives a moved message a new id). Message bodies, attachments and tokens are never logged.
 
 ## Not in v1

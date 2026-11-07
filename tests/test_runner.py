@@ -174,7 +174,7 @@ def test_records_carry_the_documented_fields_and_cut_subjects(state, log):
     assert set(record) == {
         "ts", "message_id", "internet_message_id", "received", "from_addr", "subject",
         "score", "rules", "keep_rule_hit", "relays_untrusted", "first_untrusted_ip",
-        "auth_results_present", "mode", "decision", "reason", "action_error", "current_message_id", "folder",
+        "auth_results_present", "mode", "decision", "reason", "action_error", "ms_scl", "current_message_id", "folder",
     }
     assert len(record["subject"]) == 120
     assert "body" not in record
@@ -221,3 +221,38 @@ def test_a_restored_message_is_kept_with_reason_restored_and_not_rescored(state,
     ]
     assert decisions.records[0]["score"] is None  # never fetched or scored
     assert graph.actions() == [("move", "AAA2", "deleteditems")]
+
+
+def scored_with_scl(scl, base=1.2):
+    from outlook_junk_filter.scoring import ScoreResult
+
+    def score_fn(raw):
+        return ScoreResult(score=base, rules=["DKIM_INVALID", "URG_BIZ"], auth_results_present=True, ms_scl=scl)
+
+    return score_fn
+
+
+def test_microsoft_scl_8_lifts_an_obvious_spam_with_a_low_spamassassin_score_into_quarantine(state, log):
+    cfg = make_config(**{**ACT, "OJF_QUARANTINE_THRESHOLD": "3", "OJF_DELETE_THRESHOLD": "6"})
+    graph = FakeGraph([msg(1)])
+    _, records = run(cfg, graph, state, log, scored_with_scl(8))
+    record = records[0]
+    assert record["score"] == 4.2 and record["decision"] == "quarantined" and record["ms_scl"] == 8
+    assert "OJF_MS_SCL_8" in record["rules"] and "DKIM_INVALID" in record["rules"]
+
+
+def test_scl_levels_without_points_missing_headers_and_the_off_switch_change_nothing(state, log):
+    cfg = make_config(OJF_QUARANTINE_THRESHOLD="3")
+    for scl in (None, 1, 5, -1):
+        _, records = run(cfg, FakeGraph([msg(1)]), type(state)(state.path.parent.parent / f"s{scl}"), log, scored_with_scl(scl))
+        assert records[0]["score"] == 1.2 and "OJF_MS_SCL" not in " ".join(records[0]["rules"])
+    off = make_config(OJF_QUARANTINE_THRESHOLD="3", OJF_MS_SCL_POINTS="off")
+    _, records = run(off, FakeGraph([msg(1)]), type(state)(state.path.parent.parent / "off"), log, scored_with_scl(9))
+    assert records[0]["score"] == 1.2 and records[0]["ms_scl"] == 9
+
+
+def test_the_run_reports_how_many_messages_carried_the_scl_header(state, log, caplog):
+    cfg = make_config()
+    with caplog.at_level("INFO", logger="ojf-test"):
+        run(cfg, FakeGraph([msg(1)]), state, log, scored_with_scl(8))
+    assert any("Microsoft SCL header present on 1 of 1 scored messages" in r.getMessage() for r in caplog.records)

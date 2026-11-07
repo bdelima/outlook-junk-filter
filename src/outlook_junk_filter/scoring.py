@@ -25,6 +25,7 @@ class ScoreResult:
     relays_untrusted: str = ""
     first_untrusted_ip: str = ""
     auth_results_present: bool = False
+    ms_scl: int | None = None  # Microsoft's spam confidence level from the message headers, if present
 
 
 def _env(state_dir: Path) -> dict:
@@ -69,6 +70,15 @@ def _unfold(value) -> str:
     return re.sub(r"\s+", " ", str(value)).strip()
 
 
+def ms_scl(original) -> int | None:
+    """Microsoft's SCL from X-MS-Exchange-Organization-SCL (the first, i.e. latest-added, header), or None."""
+    value = original.get("X-MS-Exchange-Organization-SCL")
+    try:
+        return int(str(value).strip()) if value is not None else None
+    except ValueError:
+        return None
+
+
 def parse_output(output: bytes, raw: bytes) -> ScoreResult:
     """Read the score, fired rules and relays from SpamAssassin's output (report_safe 0)."""
     msg = email.message_from_bytes(output, policy=email.policy.compat32)
@@ -93,6 +103,7 @@ def parse_output(output: bytes, raw: bytes) -> ScoreResult:
         relays_untrusted=relays[:1000],
         first_untrusted_ip=ip_match.group(1) if ip_match else "",
         auth_results_present="Authentication-Results" in original,
+        ms_scl=ms_scl(original),
     )
 
 
