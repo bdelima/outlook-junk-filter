@@ -54,7 +54,7 @@ jobs:
               grep -hE "^(License|Copyright):" /usr/share/doc/$pkg/copyright 2>/dev/null | sort | uniq -c | sort -rn | head -6
             done
             echo "== spamassassin copyright"; grep -iE -m6 "apache|^license|licensed" /usr/share/doc/spamassassin/copyright
-            echo "== bayes_auto_learn default (SpamAssassin's own)"; grep -rh -B1 -A1 "bayes_auto_learn" /usr/share/spamassassin/10_default_prefs.cf | head -8
+            echo "== bayes_auto_learn default (SpamAssassin default)"; grep -rh -B1 -A1 "bayes_auto_learn" /usr/share/spamassassin/10_default_prefs.cf | head -8
             echo "== python"; python --version; python -c "import sys; print(sys.version)"
             cat /etc/debian_version
           '
