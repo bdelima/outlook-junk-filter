@@ -35,6 +35,8 @@ class Runner:
         self.touch = touch
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.restored = restored  # messages restored from the review page: always kept
+        self._scored = 0  # messages scored this run, and how many carried a Microsoft SCL header
+        self._scl_seen = 0
         self._qid: str | None = None  # the quarantine folder's id once resolved
 
     # ------------------------------------------------------------------ records
@@ -74,6 +76,7 @@ class Runner:
                 "decision": decision,
                 "reason": reason,
                 "action_error": action_error,
+                "ms_scl": result.ms_scl if result else None,
                 "current_message_id": message["id"] if current_message_id is None else current_message_id,
                 "folder": JUNK if folder is None else folder,
             }
@@ -149,6 +152,12 @@ class Runner:
             self._fail(message, mode, f"scoring failed: {exc}", counts)
             return
 
+        bonus = self.cfg.scl_points.get(result.ms_scl, 0.0) if result.ms_scl is not None else 0.0
+        if bonus:
+            result.score = round(result.score + bonus, 3)
+            result.rules = [*result.rules, f"OJF_MS_SCL_{result.ms_scl}"]
+        self._scored += 1
+        self._scl_seen += result.ms_scl is not None
         scores.append(result.score)
         keep_rule_hit = any(self.cfg.keep_pattern.search(rule) for rule in result.rules)
 
@@ -299,6 +308,14 @@ class Runner:
             self.state.save()
 
         self._expire_quarantine(mode, counts)
+
+        if self._scored:
+            self.log.info(
+                "Microsoft SCL header present on %d of %d scored messages (OJF_MS_SCL_POINTS %s)",
+                self._scl_seen,
+                self._scored,
+                self.cfg.scl_points or "off",
+            )
 
         self.log.info(
             "run summary: %s; Junk folder count %s; score histogram %s",

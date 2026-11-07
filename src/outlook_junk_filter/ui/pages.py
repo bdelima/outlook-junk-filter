@@ -120,7 +120,7 @@ def message_page(record: dict, info: dict, quarantine_folder: str = "") -> str:
     fields = [
         "ts", "message_id", "internet_message_id", "received", "from_addr", "subject", "score",
         "keep_rule_hit", "relays_untrusted", "first_untrusted_ip", "auth_results_present", "mode", "decision",
-        "reason", "action_error", "current_message_id", "folder",
+        "reason", "action_error", "ms_scl", "current_message_id", "folder",
     ]
     items = "".join(f"<dt>{esc(name)}</dt><dd>{esc(record.get(name))}</dd>" for name in fields)
     rules = record.get("rules") or []

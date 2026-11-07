@@ -131,3 +131,12 @@ def test_csrf_check_is_off_by_default_and_configurable():
 def test_the_old_per_account_variables_are_ignored():
     cfg = load(OJF_MODE_LIVE="act", OJF_MODE_OUTLOOK="act", OJF_DELETE_MODE="permanent", OJF_DELETE_THRESHOLD="10")
     assert cfg.effective_mode() == "report-only" and cfg.problems == []
+
+
+def test_microsoft_scl_points_default_off_switch_and_bad_values():
+    assert load().scl_points == {7: 1.5, 8: 3.0, 9: 4.0}
+    assert load(OJF_MS_SCL_POINTS="off").scl_points == {}
+    assert load(OJF_MS_SCL_POINTS="8=2, 9=5").scl_points == {8: 2.0, 9: 5.0}
+    for bad in ("high", "8", "8=x", "12=1", "8=nan"):
+        cfg = load(OJF_MS_SCL_POINTS=bad)
+        assert cfg.scl_points == {7: 1.5, 8: 3.0, 9: 4.0} and any("OJF_MS_SCL_POINTS" in p for p in cfg.problems), bad

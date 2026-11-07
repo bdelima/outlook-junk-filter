@@ -75,3 +75,15 @@ def test_lint_reports_failure(monkeypatch, tmp_path):
     assert ok is False and "error" in detail
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, b"", b""))
     assert scoring.lint(tmp_path)[0] is True
+
+
+def test_microsoft_scl_is_read_from_the_header_and_bad_values_are_ignored():
+    def scl(header):
+        raw = (b"X-MS-Exchange-Organization-SCL: " + header + b"\r\nSubject: x\r\n\r\nbody") if header is not None else b"Subject: x\r\n\r\nbody"
+        return scoring.parse_output(OUT, raw).ms_scl
+
+    assert scl(b"8") == 8 and scl(b" 9 ") == 9 and scl(b"-1") == -1
+    assert scl(None) is None and scl(b"high") is None
+    # the first (latest-added) header wins
+    raw = b"X-MS-Exchange-Organization-SCL: 9\r\nX-MS-Exchange-Organization-SCL: 1\r\nSubject: x\r\n\r\nbody"
+    assert scoring.parse_output(OUT, raw).ms_scl == 9
