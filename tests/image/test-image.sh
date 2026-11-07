@@ -81,6 +81,21 @@ if [ -n "$phish" ] && [ -n "$news" ]; then
   if awk -v p="$p" -v n="$n" 'BEGIN { exit !(p > n) }'; then ok "phishing fixture ($p) scores higher than the newsletter fixture ($n)"; else fail "phishing $p is not higher than newsletter $n"; fi
 fi
 
+# 6b. Microsoft Safe Links wraps every link in a redirect (https://*.safelinks.protection.outlook.com/?url=<target>&...).
+#     SpamAssassin must still see the real destination, because the URL blocklists look up its domain. Offline (-L), so no network;
+#     the synthetic wrapped fixture must yield its target "in redirector", and the plain control must yield it directly.
+sa_uris() { # fixture
+  docker run --rm --read-only --user 1000:1000 -v "$state:/state" -v "$cfg_offline:/config" -v "$PWD/tests/fixtures:/fixtures:ro"     -e HOME=/state/home -e TMPDIR=/state/tmp --entrypoint sh "$IMAGE" -c     "mkdir -p /state/home /state/tmp && spamassassin --nocreate-prefs --siteconfigpath /config -L -D uri -t < /fixtures/$1" 2>&1
+}
+wrapped_uris=$(sa_uris safelinks-wrapped.eml) || true
+plain_uris=$(sa_uris safelinks-plain.eml) || true
+if echo "$wrapped_uris" | grep -q "parsed uri found: https://ojf-synthetic-target.shop/offer?id=1 in redirector: https://na01.safelinks.protection.outlook.com/"; then
+  ok "SpamAssassin extracts the real target from a Safe Links wrapped link"
+else
+  fail "SpamAssassin does not unwrap Safe Links: URL blocklists would only see the Safe Links host"
+fi
+if echo "$plain_uris" | grep -q "cleaned uri: https://ojf-synthetic-target.shop/offer?id=1"; then ok "plain control fixture yields the same target directly"; else fail "plain control fixture: no target uri"; fi
+
 # 7. sa-learn teaches Bayes into /state/bayes (what the review page's "teach" actions run), as uid 1000 on a read-only root
 nspam=$(docker run --rm --read-only --user 1000:1000 -v "$state:/state" -v "$cfg_offline:/config" -v "$PWD/tests/fixtures:/fixtures:ro"   -e HOME=/state/home -e TMPDIR=/state/tmp --entrypoint sh "$IMAGE" -c   'mkdir -p /state/home /state/tmp /state/bayes && sa-learn --spam --single --siteconfigpath /config < /fixtures/phishing.eml >/dev/null 2>&1 && sa-learn --dump magic --siteconfigpath /config 2>/dev/null | awk "/non-token data: nspam/ {print \$3}"' 2>&1) || true
 if [ "${nspam:-0}" -ge 1 ] 2>/dev/null; then ok "sa-learn teaches Bayes ($nspam spam message learned)"; else fail "sa-learn did not learn: nspam='$nspam'"; fi

@@ -121,7 +121,8 @@ shows, because senders and subjects come from phishing mail.
     Teach wanted bulk such as Reddit and Substack as *not spam*. A permanently deleted message is gone, so that row is
     view-only.
   - **Allowlist** a sender address or domain: adds a `whitelist_auth` line to `/config/ojf-allowlist.cf`, so it counts
-    only when SPF or DKIM passes.
+    only when SPF or DKIM passes. Microsoft Safe Links rewrites the links in many messages before they reach your mailbox
+    (see [Safe Links](#safe-links)), which breaks the sender's DKIM signature, so for those messages only SPF can pass.
   - **Restore** a message from the quarantine folder or Deleted Items to Junk or the Inbox. The job then keeps it and
     never rescores it.
 - **Auto-learn:** SpamAssassin's own `bayes_auto_learn` is on by default (`config/local.cf.example` carries the line, and
@@ -134,7 +135,7 @@ shows, because senders and subjects come from phishing mail.
 2. **Tune it.** Read the per-message log. Confirm Microsoft's `Received` headers record the connecting IP, that
    `auth_results_present` is true, and that `first_untrusted_ip` is the real sender's. Then set `trusted_networks` in
    `local.cf` to the Microsoft hops that appear in your own samples (set only `trusted_networks`; `internal_networks`
-   defaults to it). Build the allowlist from sender domains that pass DKIM and carry `List-Unsubscribe`.
+   defaults to it). Build the allowlist from sender domains that pass SPF or DKIM and carry `List-Unsubscribe`.
 3. Choose the threshold where almost nothing wanted lies above it. SpamAssassin's default spam mark is 5.0, but its
    documentation advises deleting automatically only at exceptionally high scores such as 15.0 or higher.
 4. Set `OJF_DELETE_MODE` (start with `deleted-items`) and a threshold: `OJF_QUARANTINE_THRESHOLD` to start by moving
@@ -142,6 +143,18 @@ shows, because senders and subjects come from phishing mail.
    Set `OJF_MODE=act`, update the stack, and check the quarantine folder by hand.
 
 To bring in newer SpamAssassin rules, update the stack with force-rebuild: rules are fixed when the image is built.
+
+### Safe Links
+
+Microsoft Safe Links rewrites links in incoming mail to `https://<region>.safelinks.protection.outlook.com/?url=<encoded
+target>&data=...`. What that means here:
+
+- **URL blocklists still see the real destination.** SpamAssassin's shipped redirector patterns include one that matches
+  the `url=` parameter, so it looks up the target's domain, not the Safe Links host. The image test checks this on a
+  synthetic message (`tests/fixtures/safelinks-wrapped.eml`) every build, offline.
+- **DKIM does not survive.** The rewrite changes the message body after the sender signed it, so the signature's body hash
+  no longer matches and SpamAssassin reports `DKIM_INVALID`, even though Microsoft's own `Authentication-Results` (taken
+  before the rewrite) says `dkim=pass`. An allowlist entry for a rewritten message therefore rests on SPF alone.
 
 ### Logs
 

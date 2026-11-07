@@ -1,0 +1,33 @@
+Received: from mail.sender-host.invalid (mail.sender-host.invalid
+ [192.0.2.55]) by example-mx.invalid with ESMTP id 1234567890; Sat, 7 Nov 2026
+ 10:00:00 +0000
+Authentication-Results: spf=pass (sender IP is 192.0.2.55)
+ smtp.mailfrom=sender-host.invalid; dkim=pass (signature was verified)
+ header.d=sender-host.invalid; dmarc=pass action=none
+ header.from=sender-host.invalid;
+X-MS-Exchange-Organization-SCL: 8
+X-Microsoft-Antispam: BCL:0;
+From: "Prize Desk" <desk@sender-host.invalid>
+To: someone@example.invalid
+Subject: Your reward is waiting
+Date: Sat, 07 Nov 2026 10:00:00 +0000
+Message-ID: <safelinks-wrapped@sender-host.invalid>
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Congratulations, you have been selected.</p><p><a href=3D"http=
+s://na01.safelinks.protection.outlook.com/?url=3Dhttps%3A%2F%2Fojf-synthetic-=
+target.shop%2Foffer%3Fid%3D1%26ref%3Da&amp;data=3D05%7C02%7Crecipient%40examp=
+le.invalid%7C0123456789abcdef0123456789abcdef%7C00000000-0000-0000-0000-00000=
+0000000%7C0%7C0%7C639000000000000000%7CUnknown%7CTWFpbGZsb3d8eyJ0ZXN0Ijp0cnVl=
+fQ%3D%3D%7C0%7C%7C%7C&amp;sdata=3DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+%3D&amp;reserved=3D0" originalsrc=3D"https://ojf-synthetic-target.shop/offer?=
+id=3D1&amp;ref=3Da">Claim your reward now</a></p><p><a href=3D"https://na01.s=
+afelinks.protection.outlook.com/?url=3Dhttps%3A%2F%2Fojf-synthetic-target.sho=
+p%2Funsubscribe&amp;data=3D05%7C02%7Crecipient%40example.invalid%7C0123456789=
+abcdef0123456789abcdef%7C00000000-0000-0000-0000-000000000000%7C0%7C0%7C63900=
+0000000000000%7CUnknown%7CTWFpbGZsb3d8eyJ0ZXN0Ijp0cnVlfQ%3D%3D%7C0%7C%7C%7C&a=
+mp;sdata=3DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D&amp;reserved=3D0" o=
+riginalsrc=3D"https://ojf-synthetic-target.shop/unsubscribe">Unsubscribe</a><=
+/p></body></html>
