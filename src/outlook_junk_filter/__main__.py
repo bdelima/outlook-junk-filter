@@ -67,7 +67,7 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
 
     try:  # the review page lives in this process; if it cannot start, the job still runs
         actions = Actions(graph_for, restored, cfg.state_dir, Path(config_dir))
-        serve_in_thread(cfg.ui_port, Context(cfg.state_dir / "logs", actions))
+        serve_in_thread(cfg.ui_port, Context(cfg.state_dir / "logs", actions, csrf=cfg.ui_csrf))
         log.info("Review page on port %d", cfg.ui_port)
     except OSError as exc:
         log.error("ERROR the review page could not start on port %d: %s", cfg.ui_port, exc)

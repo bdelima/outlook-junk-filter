@@ -56,7 +56,7 @@ def web(tmp_path):
 
     restored = RestoredList(state)
     actions = Actions(lambda account: graph, restored, state, config, run=fake_run)
-    ctx = Context(log_dir, actions)
+    ctx = Context(log_dir, actions, csrf=True)
     server = make_server(0, ctx, host="127.0.0.1")
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield type("W", (), {
@@ -240,3 +240,12 @@ def test_without_the_job_actions_are_unavailable_but_viewing_works(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_with_csrf_off_actions_need_no_token_and_ignore_the_origin(web):
+    web.ctx.csrf = False
+    form = urlencode({"account": "live", "id": "M1", "ts": "2026-11-05T10:00:00Z", "action": "teach-spam"})  # no token
+    headers = {"Content-Type": "application/x-www-form-urlencoded", "Origin": "http://proxy.lan.invalid"}
+    status, _, body = request(web, "POST", "/act", form, headers)
+    assert status == 200 and "Taught Bayes: spam" in body
+    assert len(web.learn) == 1

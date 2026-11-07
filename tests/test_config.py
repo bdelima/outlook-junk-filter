@@ -117,3 +117,11 @@ def test_review_page_port():
     for bad in ("0", "70000", "web"):
         cfg = load(OJF_UI_PORT=bad)
         assert cfg.ui_port == 60888 and any("OJF_UI_PORT" in p for p in cfg.problems)
+
+
+def test_csrf_check_is_off_by_default_and_configurable():
+    assert load().ui_csrf is False
+    assert load(OJF_UI_CSRF="on").ui_csrf is True
+    assert load(OJF_UI_CSRF="off").ui_csrf is False
+    bad = load(OJF_UI_CSRF="maybe")
+    assert bad.ui_csrf is False and any("OJF_UI_CSRF" in p for p in bad.problems)

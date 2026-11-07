@@ -67,6 +67,7 @@ class Config:
     quarantine_threshold: float | None = None
     quarantine_retention_days: int = DEFAULT_RETENTION_DAYS
     ui_port: int = DEFAULT_UI_PORT
+    ui_csrf: bool = False
     version: str = "dev"
     # problems found while parsing; logged at startup and on every run
     problems: list = field(default_factory=list)
@@ -105,6 +106,7 @@ class Config:
             "quarantine_threshold": self.quarantine_threshold,
             "quarantine_retention_days": self.quarantine_retention_days,
             "ui_port": self.ui_port,
+            "ui_csrf": self.ui_csrf,
             "keep_rule_pattern": self.keep_pattern.pattern,
             "version": self.version,
         }
@@ -179,6 +181,16 @@ def load(env=None) -> Config:
             problems.append(f"OJF_UI_PORT={raw!r} is not a port number; using {DEFAULT_UI_PORT}")
             ui_port = DEFAULT_UI_PORT
 
+    ui_csrf = False  # off by default: the page is meant for a private LAN, behind a proxy the user controls
+    raw = _get(env, "OJF_UI_CSRF")
+    if raw is not None:
+        if raw.lower() in _TRUE:
+            ui_csrf = True
+        elif raw.lower() in _FALSE:
+            ui_csrf = False
+        else:
+            problems.append(f"OJF_UI_CSRF={raw!r} is not on or off; using off")
+
     # --- thresholds and delete mode -----------------------------------------
     delete_mode = None
     delete_mode_problem = None
@@ -229,6 +241,7 @@ def load(env=None) -> Config:
         quarantine_threshold=quarantine_threshold,
         quarantine_retention_days=retention,
         ui_port=ui_port,
+        ui_csrf=ui_csrf,
         version=_get(env, "APP_VERSION") or "dev",
         problems=problems,
         act_problems=act_problems,

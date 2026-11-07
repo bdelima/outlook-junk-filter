@@ -44,9 +44,10 @@ def filters_from(params: dict) -> logreader.Filters:
 
 
 class Context:
-    def __init__(self, log_dir: Path, actions=None):
+    def __init__(self, log_dir: Path, actions=None, csrf: bool = True):
         self.log_dir = Path(log_dir)
         self.actions = actions  # None when the page runs without the job (actions are unavailable)
+        self.csrf = csrf  # check the form token and the Origin on actions (OJF_UI_CSRF)
         self.token = secrets.token_urlsafe(32)
 
 
@@ -169,7 +170,7 @@ def make_handler(ctx: Context):
                 self._html(pages.layout("Not found", "<p>No such page.</p>"), 404)
                 return
             origin = self.headers.get("Origin")
-            if origin and urlsplit(origin).netloc != self.headers.get("Host", ""):
+            if ctx.csrf and origin and urlsplit(origin).netloc != self.headers.get("Host", ""):
                 self._html(pages.layout("Refused", "<p>Cross-site request refused.</p>"), 403)
                 return
             try:
@@ -180,7 +181,7 @@ def make_handler(ctx: Context):
                 self._html(pages.layout("Refused", "<p>Bad request.</p>"), 400)
                 return
             form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode("utf-8", "replace")).items()}
-            if not hmac.compare_digest(form.get("token", ""), ctx.token):
+            if ctx.csrf and not hmac.compare_digest(form.get("token", ""), ctx.token):
                 self._html(pages.layout("Refused", "<p>This form has expired. Go back and open the action again.</p>"), 403)
                 return
             self._act(form)
