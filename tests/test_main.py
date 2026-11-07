@@ -1,6 +1,7 @@
 """The main loop and sign-in: a pending sign-in never blocks the other account."""
 
 import logging
+import threading
 
 import pytest
 
@@ -91,6 +92,7 @@ def make_auth(tmp_path, log, flow, result):
     a.account = "live"
     a._log = log
     a._touch = lambda: None
+    a._lock = threading.RLock()
     a._path = tmp_path / "tokens" / "live.json"
     a._app = FakeApp(flow, result)
     a._cache = type("C", (), {"has_state_changed": False})()

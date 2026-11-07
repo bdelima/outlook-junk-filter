@@ -187,3 +187,20 @@ def test_run_summary_has_counts_and_histogram(state, log):
     assert summary["counts"] == {"keep": 2, "would-delete": 1}
     assert summary["histogram"] == {"-1": 1, "2": 1, "12": 1}
     assert summary["folder_count"] == 3
+
+
+def test_a_restored_message_is_kept_with_reason_restored_and_not_rescored(state, log, tmp_path):
+    from outlook_junk_filter.restored import RestoredList
+
+    restored = RestoredList(tmp_path)
+    restored.add("<m1@example.invalid>")
+    cfg = make_config(**ACT)
+    graph = FakeGraph([msg(1), msg(2)])
+    decisions = FakeDecisions()
+    AccountRunner("live", cfg, graph, state, decisions, log, scorer([50.0]), restored=restored).run()
+    assert [(r["message_id"], r["decision"], r["reason"]) for r in decisions.records] == [
+        ("AAA1", "keep", "restored"),
+        ("AAA2", "deleted", "score at or above the delete threshold"),
+    ]
+    assert decisions.records[0]["score"] is None  # never fetched or scored
+    assert graph.actions() == [("move", "AAA2", "deleteditems")]

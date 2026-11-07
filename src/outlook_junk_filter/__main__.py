@@ -11,8 +11,11 @@ from . import scoring
 from .auth import AccountAuth, AuthError
 from .graph import GraphClient, GraphError, NetworkError
 from .logs import DecisionLog, setup_container_log, touch_health
+from .restored import RestoredList
 from .runner import AccountRunner
 from .state import AccountState
+from .ui.actions import Actions
+from .ui.server import Context, serve_in_thread
 
 
 def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR, loops: int | None = None) -> int:
@@ -35,6 +38,11 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
     auths = {a: AccountAuth(a, cfg.client_id, cfg.state_dir, log, touch) for a in config_module.ACCOUNTS}
     states = {a: AccountState(a, cfg.state_dir) for a in config_module.ACCOUNTS}
 
+    restored = RestoredList(cfg.state_dir)
+
+    def graph_for(account: str) -> GraphClient:
+        return GraphClient(auths[account].access_token, log=log)
+
     def score_fn(raw: bytes):
         return scoring.score(raw, cfg.state_dir, config_dir)
 
@@ -43,8 +51,9 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
             if not lint_ok:
                 log.error("%s: ERROR SpamAssassin's config does not load; scoring nothing and keeping every message", account)
                 return
-            graph = GraphClient(auths[account].access_token, log=log)
-            AccountRunner(account, cfg, graph, states[account], decisions, log, score_fn, touch).run()
+            AccountRunner(
+                account, cfg, graph_for(account), states[account], decisions, log, score_fn, touch, restored=restored
+            ).run()
         except NetworkError as exc:
             log.error("%s: network failure, skipping this account for the run: %s", account, exc)
         except AuthError as exc:
@@ -55,6 +64,13 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
             log.exception("%s: unexpected error, carrying on", account)
         finally:
             touch()
+
+    try:  # the review page lives in this process; if it cannot start, the job still runs
+        actions = Actions(graph_for, restored, cfg.state_dir, Path(config_dir))
+        serve_in_thread(cfg.ui_port, Context(cfg.state_dir / "logs", actions))
+        log.info("Review page on port %d", cfg.ui_port)
+    except OSError as exc:
+        log.error("ERROR the review page could not start on port %d: %s", cfg.ui_port, exc)
 
     count = 0
     while True:

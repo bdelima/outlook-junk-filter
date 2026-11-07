@@ -25,7 +25,7 @@ def _from_addr(message: dict) -> str:
 
 
 class AccountRunner:
-    def __init__(self, account, cfg, graph, state, decisions, log, score_fn, touch=lambda: None, now=None):
+    def __init__(self, account, cfg, graph, state, decisions, log, score_fn, touch=lambda: None, now=None, restored=None):
         self.account = account
         self.cfg = cfg
         self.graph = graph
@@ -35,6 +35,7 @@ class AccountRunner:
         self.score_fn = score_fn
         self.touch = touch
         self.now = now or (lambda: datetime.now(timezone.utc))
+        self.restored = restored  # messages restored from the review page: always kept
         self._qid: str | None = None  # the quarantine folder's id once resolved
 
     # ------------------------------------------------------------------ records
@@ -127,6 +128,12 @@ class AccountRunner:
         return "deleted", new_id or message_id, "deleteditems"
 
     def _process(self, message, mode, counts, scores) -> None:
+        # 0. a message restored from the review page is kept and not rescored
+        if self.restored is not None and self.restored.contains(message.get("internetMessageId") or ""):
+            self._record(message, mode, "keep", "restored")
+            self.state.mark_handled(message)
+            counts["keep"] += 1
+            return
         try:
             raw = self.graph.raw(message["id"])
         except NetworkError:

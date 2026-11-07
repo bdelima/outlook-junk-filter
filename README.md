@@ -5,7 +5,7 @@ Scores the Junk folder of two personal Outlook accounts with SpamAssassin and de
 One long-lived container reads the **Junk folder only** of two personal Microsoft accounts (`live.com` and
 `outlook.com`) through Microsoft Graph, scores each message with SpamAssassin, and, in `act` mode, deletes messages
 at or above a score you choose. Wanted bulk mail stays where it is. The Inbox and every other folder are never read
-or changed. No web UI, no ports, no inbound traffic.
+or changed. The only inbound traffic is the [review page](#the-review-page) (one port, no login: put it behind a reverse proxy).
 
 Every account starts in `report-only` mode, where no mail is changed. Nothing is deleted until you have reviewed the
 scores and switched an account to `act`.
@@ -44,8 +44,8 @@ scores and switched an account to `act`.
 
 ## Deploy as a Portainer stack
 
-Add a stack with [`docker-compose.example.yml`](docker-compose.example.yml). No ports are published and no network is
-declared. Set the variables in Portainer's **Environment variables** panel, not in a `.env` file.
+Add a stack with [`docker-compose.example.yml`](docker-compose.example.yml). The only published port is the review page
+(`OJF_UI_PORT`, 60888 by default); no network is declared. Set the variables in Portainer's **Environment variables** panel, not in a `.env` file.
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
@@ -59,6 +59,7 @@ declared. Set the variables in Portainer's **Environment variables** panel, not 
 | `OJF_QUARANTINE_FOLDER` | no | `Quarantined` | Name of the top-level folder flagged messages are moved to. Any name works, except a system folder such as Junk or Inbox. Created if missing; an existing folder of that name is reused. |
 | `OJF_QUARANTINE_THRESHOLD` | no | none | Score at or above which a message is moved to the folder. Must be lower than `OJF_DELETE_THRESHOLD` when both are set. With only this set, nothing is deleted at score time. |
 | `OJF_QUARANTINE_RETENTION_DAYS` | no | `7` | Days a message stays in the folder before the job deletes it. The age counts from the message's received time, so one already older than this is deleted on the next pass. |
+| `OJF_UI_PORT` | no | `60888` | Port of the review page (the stack publishes it). |
 | `OJF_KEEP_RULE_PATTERN` | no | `^USER_IN_.*(WHITE\|WELCOME)LIST` | Regular expression. A message that fired any matching rule is always kept. |
 | `TZ` | no | `UTC` | Timezone of log timestamps. |
 
@@ -84,15 +85,47 @@ a code expires first, the job logs that and issues a fresh one. An account waiti
 
 | Path in the container | Holds |
 | --- | --- |
-| `/config/local.cf` | SpamAssassin configuration, owned by you (read-only to the job) |
+| `/config/local.cf` | SpamAssassin configuration, owned by you and hand-edited. The job never writes here |
+| `/config/ojf-allowlist.cf` | Allowlist entries added from the review page (`whitelist_auth` lines). SpamAssassin loads every `.cf` in `/config` |
 | `/state/tokens/<account>.json` | MSAL token cache, one per account, mode 600. **These are keys to your mail: back them up like secrets, never commit them.** |
 | `/state/delta/<account>.json` | Delta link, retry list, handled message ids (entries older than 90 days are dropped) |
-| `/state/bayes/` | SpamAssassin's Bayes database (inactive in v1: no training is built) |
+| `/state/bayes/` | SpamAssassin's Bayes database. It scores only after 200 spam and 200 non-spam messages have been learned |
 | `/state/logs/decisions.jsonl` | One JSON object per message, rotated by size (10 files of 10 MB) |
+| `/state/logs/actions.jsonl` | What was done from the review page: time, action, account, message id, target (never a body) |
+| `/state/restored.json` | Messages restored from the review page; the job keeps them (reason `restored`) |
 | `/state/health` | Touched by the job; the container health check reads it |
 
 The container runs as uid/gid 1000 with no home directory and works with a read-only root filesystem (only `/state`
-is written). It needs outbound HTTPS to `graph.microsoft.com` and `login.microsoftonline.com`, plus DNS.
+and `/config` are written; the job itself never writes to `/config`, only the review page's allowlist action does). It needs outbound HTTPS to `graph.microsoft.com` and `login.microsoftonline.com`, plus DNS.
+
+## The review page
+
+A web page served by the job's own process (same container, same port you publish with `OJF_UI_PORT`, default 60888). It
+shows the decisions the job logged and lets you act on them. There is **no login**: reach it through Nginx Proxy Manager
+or keep the port on a trusted network. It reads only `/state/logs/`, makes no external requests, and escapes everything it
+shows, because senders and subjects come from phishing mail.
+
+- **Decisions:** time, account, sender, subject, score, decision and reason, 100 rows per page, newest first. Filters for
+  account, decision, date range and score range; text search on sender and subject; sort by time or score; CSV export of
+  the filtered table (cells that begin with `=`, `+`, `-` or `@` are prefixed so a spreadsheet does not run them).
+- **Message detail:** every field of the log record, with the fired rules by name. The log holds no bodies, so to read a
+  message open it in Outlook (in Junk or the quarantine folder).
+- **Summary:** counts per decision per day and per account, and a score histogram. A header shows how many records are
+  loaded, the oldest and newest timestamps and the age of the last record. New records appear on reload.
+- **What-if:** type a quarantine and a delete threshold; the page counts how many logged messages would be kept,
+  quarantined or deleted, using the logged scores and allowlist hits. It saves nothing, and the scores do not reflect
+  Bayes learning since.
+- **Actions** (each on one message, with a confirmation click, each recorded in `actions.jsonl`):
+  - **Teach Bayes** as spam or not spam: the job fetches the message from Outlook again and runs `sa-learn` against the
+    Bayes database in `/state`. Works for any message still in Outlook (Junk, the quarantine folder or Deleted Items).
+    Teach wanted bulk such as Reddit and Substack as *not spam*. A permanently deleted message is gone, so that row is
+    view-only.
+  - **Allowlist** a sender address or domain: adds a `whitelist_auth` line to `/config/ojf-allowlist.cf`, so it counts
+    only when SPF or DKIM passes.
+  - **Restore** a message from the quarantine folder or Deleted Items to Junk or the Inbox. The job then keeps it and
+    never rescores it.
+- **Auto-learn:** SpamAssassin's own `bayes_auto_learn` is on by default (`config/local.cf.example` carries the line, and
+  `0` turns it off). Manual teaching works either way and corrects what auto-learn gets wrong.
 
 ## Roll it out safely
 
@@ -123,7 +156,7 @@ To bring in newer SpamAssassin rules, update the stack with force-rebuild: rules
 
 ## Not in v1
 
-Alerting beyond log lines and the health check, Bayes training, moving wanted bulk mail out of Junk (only flagged messages move), Razor/Pyzor/DCC
+Alerting beyond log lines and the health check, a sign-in for the review page, moving wanted bulk mail out of Junk (only flagged messages move), Razor/Pyzor/DCC
 and URL-reputation or LLM checks, a separate spamd container, and scheduled rebuilds are not built. Only SpamAssassin's
 built-in DNS blocklists and URL lists run, when `/config/local.cf` and DNS allow them.
 
