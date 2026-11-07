@@ -56,3 +56,15 @@ jobs:
             echo "== python"; python --version; python -c "import sys; print(sys.version)"
             cat /etc/debian_version
           '
+
+      - name: TEMP diagnose spamassassin config dirs
+        if: always()
+        run: |
+          mkdir -p /tmp/cfg && cp config/local.cf.example /tmp/cfg/local.cf && chmod -R a+rX /tmp/cfg
+          docker run --rm --user 1000:1000 -v /tmp/cfg:/config:ro --entrypoint sh ojf-test -c '
+            spamassassin -V
+            echo "== etc"; ls -la /etc/spamassassin
+            echo "== share"; ls /usr/share/spamassassin | head -30
+            echo "== var"; ls -R /var/lib/spamassassin | head -20
+            echo "== debug"; HOME=/tmp spamassassin -D config,plugin --lint --siteconfigpath /config 2>&1 | head -60
+          '
