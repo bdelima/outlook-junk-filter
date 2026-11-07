@@ -10,10 +10,12 @@ IMAGE=${1:?usage: test-image.sh IMAGE}
 want=$(tr -d '[:space:]' < VERSION)
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+# the containers create files as other uids, so clean up from inside a container
+trap 'docker run --rm -v "$work:/w" --entrypoint sh "$IMAGE" -c "rm -rf /w/*" >/dev/null 2>&1 || true; rm -rf "$work" 2>/dev/null || true' EXIT
 state="$work/state"
-mkdir "$state"
-chmod 777 "$state" # any non-root uid must be able to write here, like the real bind mount
+state_other="$work/state-other"
+mkdir "$state" "$state_other"
+chmod 777 "$state" "$state_other" # any non-root uid must be able to write here, like the real bind mount
 cfg_example="$work/cfg-example"
 cfg_offline="$work/cfg-offline"
 mkdir "$cfg_example" "$cfg_offline"
@@ -26,11 +28,11 @@ fails=0
 ok() { echo "   ok   $1"; }
 fail() { echo "FAIL: $1" >&2; fails=1; }
 
-selfcheck() { # config dir, user, then the selfcheck arguments
-  local cfg=$1 user=$2
-  shift 2
+selfcheck() { # config dir, user, state dir, then the selfcheck arguments
+  local cfg=$1 user=$2 st=$3
+  shift 3
   docker run --rm --read-only --user "$user" \
-    -v "$state:/state" -v "$cfg:/config:ro" -v "$PWD/tests/fixtures:/fixtures:ro" \
+    -v "$st:/state" -v "$cfg:/config:ro" -v "$PWD/tests/fixtures:/fixtures:ro" \
     --entrypoint python "$IMAGE" -m outlook_junk_filter.selfcheck "$@"
 }
 
@@ -53,14 +55,14 @@ else
 fi
 
 # 4. the example config loads cleanly as uid 1000, /config read-only
-if out=$(selfcheck "$cfg_example" 1000:1000 lint 2>&1); then ok "example config lints cleanly as uid 1000 ($out)"; else fail "example config lint: $out"; fi
+if out=$(selfcheck "$cfg_example" 1000:1000 "$state" lint 2>&1); then ok "example config lints cleanly as uid 1000 ($out)"; else fail "example config lint: $out"; fi
 
 # 5. it also works as another non-root uid
-if out=$(selfcheck "$cfg_offline" 4242:4242 score /fixtures/newsletter.eml 2>&1); then ok "scores as an arbitrary non-root uid"; else fail "uid 4242: $out"; fi
+if out=$(selfcheck "$cfg_offline" 4242:4242 "$state_other" score /fixtures/newsletter.eml 2>&1); then ok "scores as an arbitrary non-root uid"; else fail "uid 4242: $out"; fi
 
 # 6. a synthetic phishing-style fixture scores higher than a synthetic newsletter fixture
-phish=$(selfcheck "$cfg_offline" 1000:1000 score /fixtures/phishing.eml 2>&1) || { fail "phishing score: $phish"; phish=""; }
-news=$(selfcheck "$cfg_offline" 1000:1000 score /fixtures/newsletter.eml 2>&1) || { fail "newsletter score: $news"; news=""; }
+phish=$(selfcheck "$cfg_offline" 1000:1000 "$state" score /fixtures/phishing.eml 2>&1) || { fail "phishing score: $phish"; phish=""; }
+news=$(selfcheck "$cfg_offline" 1000:1000 "$state" score /fixtures/newsletter.eml 2>&1) || { fail "newsletter score: $news"; news=""; }
 echo "      phishing:   $phish"
 echo "      newsletter: $news"
 if [ -n "$phish" ] && [ -n "$news" ]; then

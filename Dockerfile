@@ -22,6 +22,12 @@ RUN apt-get update \
     if [ "$rc" -ge 2 ]; then echo "sa-update failed with $rc" >&2; exit 1; fi \
  && rm -rf /var/lib/apt/lists/*
 
+# The job runs spamassassin with --siteconfigpath /config, which replaces Debian's
+# /etc/spamassassin, where the .pre files that load the plugins (including Check) live.
+# Without them nothing can be scored. Copy them into the default rules directory, which is
+# always read, so /config only needs the user's own local.cf.
+RUN cp /etc/spamassassin/*.pre /usr/share/spamassassin/
+
 # No home directory: the job points HOME and TMPDIR under /state.
 RUN groupadd --gid 1000 ojf \
  && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin ojf \
