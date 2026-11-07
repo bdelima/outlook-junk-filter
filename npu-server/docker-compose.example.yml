@@ -1,0 +1,16 @@
+# Example stack for the ovms-npu image (Portainer: paste into a new stack and set the variables).
+services:
+  ovms-npu:
+    image: bdelima/ovms-npu:1.0.0
+    container_name: ovms-npu
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"          # must own the models folder
+    group_add:
+      - "${RENDER_GID}"              # numeric gid of /dev/dri/render*: stat -c %g /dev/dri/render*
+    devices:
+      - /dev/accel:/dev/accel
+    ports:
+      - "8000:8000"                  # no authentication: trusted network only
+    volumes:
+      - ${MODELS_DIR}:/models:rw
+    command: ["--rest_port", "8000", "--config_path", "/models/config.json"]
