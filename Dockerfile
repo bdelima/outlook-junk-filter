@@ -24,9 +24,16 @@ RUN apt-get update \
 
 # The job runs spamassassin with --siteconfigpath /config, which replaces Debian's
 # /etc/spamassassin, where the .pre files that load the plugins (including Check) live.
-# Without them nothing can be scored. Copy them into the default rules directory, which is
-# always read, so /config only needs the user's own local.cf.
-RUN cp /etc/spamassassin/*.pre /usr/share/spamassassin/
+# Without them nothing can be scored. SpamAssassin also reads .pre files from the "sys rules"
+# directory: the sa-update directory (/var/lib/spamassassin/<version>) once sa-update has
+# run, else /usr/share/spamassassin. Copy them there, so /config only needs the user's own
+# local.cf. The test below fails the build if the Check plugin still cannot load.
+RUN for dir in /var/lib/spamassassin/[0-9]* /usr/share/spamassassin; do \
+      [ -d "$dir" ] && cp /etc/spamassassin/*.pre "$dir"/; \
+    done; \
+    mkdir -p /tmp/sa-check && echo "report_safe 0" > /tmp/sa-check/local.cf \
+ && HOME=/tmp spamassassin --lint --siteconfigpath /tmp/sa-check \
+ && rm -rf /tmp/sa-check /tmp/.spamassassin
 
 # No home directory: the job points HOME and TMPDIR under /state.
 RUN groupadd --gid 1000 ojf \
