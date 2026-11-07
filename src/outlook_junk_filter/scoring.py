@@ -26,6 +26,8 @@ class ScoreResult:
     first_untrusted_ip: str = ""
     auth_results_present: bool = False
     ms_scl: int | None = None  # Microsoft's spam confidence level from the message headers, if present
+    ai_score: float | None = None  # the AI's 0-10 rating, when it was asked
+    ai_reason: str = ""
 
 
 def _env(state_dir: Path) -> dict:

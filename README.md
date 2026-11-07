@@ -61,6 +61,12 @@ Add a stack with [`docker-compose.example.yml`](docker-compose.example.yml). The
 | `OJF_UI_PORT` | no | `60888` | Port of the review page (the stack publishes it). |
 | `OJF_UI_CSRF` | no | `off` | `on` makes the review page's actions require a per-process form token and refuse a request whose `Origin` is not the page's own host (the proxy must then pass `Host` through unchanged). Off by default: the page has no login and is meant for a private LAN. |
 | `OJF_MS_SCL_POINTS` | no | `7=1.5,8=3,9=4` | Points added to the score from Microsoft's own spam verdict, the `X-MS-Exchange-Organization-SCL` header (0-9; 5-6 spam, 7-9 high-confidence spam). A message Microsoft rates 8 gets +3 on top of SpamAssassin's score and is logged with the rule `OJF_MS_SCL_8`. `off` disables it. |
+| `OJF_AI_URL` | no | none (AI scoring off) | Address of an OpenAI-compatible chat server on your network, for example `http://ojochal:8000` (the [`ovms-npu`](npu-server/README.md) image). A bare host and port gets `/v3` added; a URL with its own path is used as given. See [AI scoring](#ai-scoring). |
+| `OJF_AI_MODEL` | no | `OpenVINO/Qwen3-8B-int4-cw-ov` | Model name sent to the server. |
+| `OJF_AI_MAX_POINTS` | no | `4` | Most points the AI can add (at a rating of 10; ratings of 5 or less add nothing). |
+| `OJF_AI_MIN_SCORE` | no | `0` | Only messages whose score so far is at least this go to the AI. |
+| `OJF_AI_MAX_SCORE` | no | the delete threshold | ... and below this. Messages at or above it are already decided. |
+| `OJF_AI_TIMEOUT_SECONDS` | no | `60` | Time allowed per rating (the first request after the server starts is slow). |
 | `OJF_KEEP_RULE_PATTERN` | no | `^USER_IN_.*(WHITE\|WELCOME)LIST` | Regular expression. A message that fired any matching rule is always kept. |
 | `TZ` | no | `UTC` | Timezone of log timestamps. |
 
@@ -144,6 +150,22 @@ shows, because senders and subjects come from phishing mail.
    Set `OJF_MODE=act`, update the stack, and check the quarantine folder by hand.
 
 To bring in newer SpamAssassin rules, update the stack with force-rebuild: rules are fixed when the image is built.
+
+### AI scoring
+
+Optional and off until `OJF_AI_URL` is set. After the normal pipeline has scored a message (SpamAssassin, the Microsoft SCL bonus,
+the shipped rules), a message whose score is inside `OJF_AI_MIN_SCORE` to `OJF_AI_MAX_SCORE` (and not allowlisted) is rated 0 to 10 by
+the language model at that address. A rating above 5 adds points, up to `OJF_AI_MAX_POINTS` at 10. The rating and the model's one-line
+reason are stored in the log (`ai_score`, `ai_reason`, shown on the message page) and a high rating adds the rule `OJF_AI_<n>`.
+
+- **What is sent:** the sender address, the subject and the first 1,500 characters of the body text, to the address you set. No
+  attachments or headers. Nothing leaves your network if the server is on it.
+- **Untrusted input:** the prompt tells the model the message is untrusted and not to follow it, and only the number in the reply is
+  used. A message that tells the model to rate it 0 can at worst earn no points.
+- **Failure is harmless:** if the server is unreachable or answers with an error, the message gets no AI points, and the job stops
+  asking until the next run (it logs one warning). An unreadable reply costs only that message.
+- **Each run logs** `AI rated N of M scored messages (score range ... ), K failed`.
+- **Speed:** about 7 seconds per message on an Intel Meteor Lake NPU, one at a time. The score range keeps that to the ambiguous middle.
 
 ### Extra rules shipped in the image
 

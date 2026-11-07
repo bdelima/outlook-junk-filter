@@ -14,6 +14,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 MODES = ("report-only", "act")
 DELETE_MODES = ("deleted-items", "permanent")
@@ -23,6 +24,9 @@ DEFAULT_KEEP_PATTERN = r"^USER_IN_.*(WHITE|WELCOME)LIST"
 DEFAULT_QUARANTINE_FOLDER = "Quarantined"
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_UI_PORT = 60888
+DEFAULT_AI_MODEL = "OpenVINO/Qwen3-8B-int4-cw-ov"
+DEFAULT_AI_POINTS = 4.0
+DEFAULT_AI_TIMEOUT = 60
 # Microsoft's own spam verdict (SCL, 0-9; 5-6 spam, 7-9 high-confidence spam) -> points added to the score
 DEFAULT_SCL_POINTS = {7: 1.5, 8: 3.0, 9: 4.0}
 _TRUE = ("1", "true", "yes", "on")
@@ -72,6 +76,12 @@ class Config:
     ui_port: int = DEFAULT_UI_PORT
     ui_csrf: bool = False
     scl_points: dict = field(default_factory=lambda: dict(DEFAULT_SCL_POINTS))  # SCL value -> points; empty = off
+    ai_url: str | None = None  # base URL of an OpenAI-compatible chat server; None = AI scoring off
+    ai_model: str = DEFAULT_AI_MODEL
+    ai_max_points: float = DEFAULT_AI_POINTS
+    ai_min_score: float = 0.0  # only messages whose score so far is at or above this go to the AI
+    ai_max_score: float | None = None  # ... and below this; None = the delete threshold
+    ai_timeout: int = DEFAULT_AI_TIMEOUT
     version: str = "dev"
     # problems found while parsing; logged at startup and on every run
     problems: list = field(default_factory=list)
@@ -82,6 +92,15 @@ class Config:
     def quarantine_active(self) -> bool:
         """Quarantine is on and has a threshold to act on."""
         return self.quarantine_enabled and self.quarantine_threshold is not None
+
+    @property
+    def ai_upper(self) -> float | None:
+        """Messages at or above this score are already decided; None = no upper limit."""
+        return self.ai_max_score if self.ai_max_score is not None else self.delete_threshold
+
+    def ai_points(self, ai_score: float) -> float:
+        """Points for an AI rating of 0-10: nothing up to 5, then up to ai_max_points at 10."""
+        return round(self.ai_max_points * max(0.0, ai_score - 5.0) / 5.0, 3)
 
     def effective_mode(self) -> str:
         """The mode the job really runs in: act only if everything act needs is valid."""
@@ -111,6 +130,10 @@ class Config:
             "ui_port": self.ui_port,
             "ui_csrf": self.ui_csrf,
             "ms_scl_points": self.scl_points,
+            "ai_url": self.ai_url,
+            "ai_model": self.ai_model if self.ai_url else None,
+            "ai_range": [self.ai_min_score, self.ai_upper] if self.ai_url else None,
+            "ai_max_points": self.ai_max_points if self.ai_url else None,
             "keep_rule_pattern": self.keep_pattern.pattern,
             "version": self.version,
         }
@@ -211,6 +234,45 @@ def load(env=None) -> Config:
                     f"OJF_MS_SCL_POINTS={raw!r} is not like 7=1.5,8=3,9=4 (or off); using the default"
                 )
 
+    ai_url = None
+    raw = _get(env, "OJF_AI_URL")
+    if raw is not None:
+        parts = urlsplit(raw)
+        if parts.scheme in ("http", "https") and parts.netloc:
+            # a bare host:port means OpenVINO Model Server's OpenAI-style API, served under /v3
+            ai_url = raw.rstrip("/") if parts.path.strip("/") else raw.rstrip("/") + "/v3"
+        else:
+            problems.append(f"OJF_AI_URL={raw!r} is not an http:// or https:// address; AI scoring is off")
+    ai_model = _get(env, "OJF_AI_MODEL") or DEFAULT_AI_MODEL
+    ai_max_points, ai_min_score, ai_max_score, ai_timeout = DEFAULT_AI_POINTS, 0.0, None, DEFAULT_AI_TIMEOUT
+    value, problem = _threshold(env, "OJF_AI_MAX_POINTS")
+    if problem:
+        problems.append(f"{problem}; using {DEFAULT_AI_POINTS}")
+    elif value is not None:
+        if value < 0:
+            problems.append(f"OJF_AI_MAX_POINTS={value} is negative; using {DEFAULT_AI_POINTS}")
+        else:
+            ai_max_points = value
+    value, problem = _threshold(env, "OJF_AI_MIN_SCORE")
+    if problem:
+        problems.append(f"{problem}; using 0")
+    elif value is not None:
+        ai_min_score = value
+    value, problem = _threshold(env, "OJF_AI_MAX_SCORE")
+    if problem:
+        problems.append(f"{problem}; using the delete threshold")
+    else:
+        ai_max_score = value
+    raw = _get(env, "OJF_AI_TIMEOUT_SECONDS")
+    if raw is not None:
+        try:
+            ai_timeout = int(raw)
+            if not 1 <= ai_timeout <= 600:
+                raise ValueError
+        except ValueError:
+            problems.append(f"OJF_AI_TIMEOUT_SECONDS={raw!r} is not a whole number from 1 to 600; using {DEFAULT_AI_TIMEOUT}")
+            ai_timeout = DEFAULT_AI_TIMEOUT
+
     # --- thresholds and delete mode -----------------------------------------
     delete_mode = None
     delete_mode_problem = None
@@ -263,6 +325,12 @@ def load(env=None) -> Config:
         ui_port=ui_port,
         ui_csrf=ui_csrf,
         scl_points=scl_points,
+        ai_url=ai_url,
+        ai_model=ai_model,
+        ai_max_points=ai_max_points,
+        ai_min_score=ai_min_score,
+        ai_max_score=ai_max_score,
+        ai_timeout=ai_timeout,
         version=_get(env, "APP_VERSION") or "dev",
         problems=problems,
         act_problems=act_problems,
