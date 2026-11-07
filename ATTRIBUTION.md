@@ -62,3 +62,19 @@ Microsoft, Outlook, Outlook.com, Live.com and Microsoft Graph are trademarks of 
 SpamAssassin and Apache are trademarks of the Apache Software Foundation. Debian is a registered trademark of
 Software in the Public Interest, Inc. Python is a trademark of the Python Software Foundation. This is an
 unofficial project, not affiliated with or endorsed by any of them.
+
+## ovms-npu image (`npu-server/`)
+
+A second image built in this repository. It repackages third-party software; none of it is relicensed, and this
+repository's MIT license covers only the files written here (the Dockerfile, test script, workflows and docs).
+
+- **OpenVINO Model Server** (`openvino/model_server`, pinned by digest in `npu-server/Dockerfile`): Apache-2.0,
+  https://github.com/openvinotoolkit/model_server. The base image, unmodified except for the file below. It contains
+  OpenVINO (Apache-2.0) and other components, including Intel GPU runtime libraries, under their own licenses as
+  shipped by Intel in that image; this repository does not alter them.
+- **Intel NPU driver `libze_intel_npu` 1.38.0** (MIT), https://github.com/intel/linux-npu-driver, release v1.38.0.
+  How it's used: downloaded at build time from the GitHub release (SHA-256 pinned), the single library extracted from
+  the `intel-level-zero-npu` package, and placed in the image in place of the older 1.35.0 build.
+- **Level Zero loader** (MIT), https://github.com/oneapi-src/level-zero: already part of the base image, not changed.
+- **Model weights are not in the image.** The documented setup downloads `OpenVINO/Qwen3-8B-int4-cw-ov`, an OpenVINO
+  conversion of Qwen/Qwen3-8B; its Hugging Face model card states Apache-2.0. Read the model card before use.
