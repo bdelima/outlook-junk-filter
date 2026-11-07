@@ -12,3 +12,19 @@ body     __OJF_ED_PITCH  /\b(?:(?:prescription )?(?:blue )?pills?\b.{0,80}\b(?:s
 meta     OJF_ED_SPAM     (__OJF_ED_SUBJ + __OJF_ED_ACT + __OJF_ED_PITCH) >= 2
 describe OJF_ED_SPAM     Erectile-dysfunction pitch without naming a drug
 score    OJF_ED_SPAM     3.0
+
+# Weight-loss and GLP-1 advertising. A topic alone is not spam (health newsletters exist), so this counts only when
+# Microsoft's own filter already rated the message 5 or higher (the SCL header is part of the message text SpamAssassin sees).
+header   __OJF_MS_SCL_5UP  X-MS-Exchange-Organization-SCL =~ /^\s*[5-9]\s*$/
+header   __OJF_WL_SUBJ     Subject =~ /\b(?:GLP-?1|semaglutide|tirzepatide|ozempic|wegovy|mounjaro|zepbound|weight[- ]loss)\b/i
+body     __OJF_WL_BODY     /\b(?:GLP-?1|semaglutide|tirzepatide|ozempic|wegovy|mounjaro|zepbound|(?:medical )?weight[- ]loss (?:journey|program|plan|medication|support)|lose \d+ (?:lbs|pounds))\b/i
+
+meta     OJF_WEIGHTLOSS_AD __OJF_MS_SCL_5UP && (__OJF_WL_SUBJ || __OJF_WL_BODY)
+describe OJF_WEIGHTLOSS_AD Weight-loss or GLP-1 advertising that Microsoft already rated as spam
+score    OJF_WEIGHTLOSS_AD 2.5
+
+# Microsoft already filed it as junk (SCL 5 or higher) AND the message admits it is an advertisement (stock rule
+# ADMITS_SPAM, "this is an advertisement"). Independent of topic and subject, so it also covers the next campaign.
+meta     OJF_JUNK_ADMITS_SPAM __OJF_MS_SCL_5UP && ADMITS_SPAM
+describe OJF_JUNK_ADMITS_SPAM Microsoft rated it junk and it admits to being an advertisement
+score    OJF_JUNK_ADMITS_SPAM 1.5

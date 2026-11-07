@@ -109,6 +109,14 @@ off=$(selfcheck "$cfg_off" 1000:1000 "$state" score /fixtures/ed-spam.eml 2>&1) 
 on_score=${edspam#score=}; on_score=${on_score%% *}; off_score=${off#score=}; off_score=${off_score%% *}
 if [ -n "$off" ] && awk -v a="$on_score" -v b="$off_score" 'BEGIN { exit !(a - b >= 2.9) }'; then ok "score OJF_ED_SPAM 0 in /config/local.cf switches the rule off ($on_score -> $off_score)"; else fail "could not switch the rule off: on=$on_score off=$off_score"; fi
 
+# 6d. weight-loss / GLP-1 advertising counts only when Microsoft already rated the message 5 or higher
+wl_hi=$(selfcheck "$cfg_offline" 1000:1000 "$state" score /fixtures/weightloss-ad.eml 2>&1) || { fail "weight-loss score: $wl_hi"; wl_hi=""; }
+wl_lo=$(selfcheck "$cfg_offline" 1000:1000 "$state" score /fixtures/weightloss-ad-low-scl.eml 2>&1) || { fail "weight-loss (low SCL) score: $wl_lo"; wl_lo=""; }
+if echo "$wl_hi" | grep -q "OJF_WEIGHTLOSS_AD"; then ok "OJF_WEIGHTLOSS_AD fires on a weight-loss ad Microsoft rated SCL 5"; else fail "OJF_WEIGHTLOSS_AD did not fire: $wl_hi"; fi
+if echo "$wl_hi" | grep -q "OJF_JUNK_ADMITS_SPAM"; then ok "OJF_JUNK_ADMITS_SPAM fires when Microsoft rated it SCL 5 and it admits to being an advertisement"; else fail "OJF_JUNK_ADMITS_SPAM did not fire: $wl_hi"; fi
+if [ -n "$wl_lo" ] && ! echo "$wl_lo" | grep -q "OJF_JUNK_ADMITS_SPAM"; then ok "OJF_JUNK_ADMITS_SPAM stays quiet at SCL 1"; else fail "OJF_JUNK_ADMITS_SPAM fired at SCL 1: $wl_lo"; fi
+if [ -n "$wl_lo" ] && ! echo "$wl_lo" | grep -q "OJF_WEIGHTLOSS_AD"; then ok "OJF_WEIGHTLOSS_AD stays quiet when Microsoft rated the same message SCL 1"; else fail "OJF_WEIGHTLOSS_AD fired at SCL 1: $wl_lo"; fi
+
 # 7. sa-learn teaches Bayes into /state/bayes (what the review page's "teach" actions run), as uid 1000 on a read-only root
 nspam=$(docker run --rm --read-only --user 1000:1000 -v "$state:/state" -v "$cfg_offline:/config" -v "$PWD/tests/fixtures:/fixtures:ro"   -e HOME=/state/home -e TMPDIR=/state/tmp --entrypoint sh "$IMAGE" -c   'mkdir -p /state/home /state/tmp /state/bayes && sa-learn --spam --single --siteconfigpath /config < /fixtures/phishing.eml >/dev/null 2>&1 && sa-learn --dump magic --siteconfigpath /config 2>/dev/null | awk "/non-token data: nspam/ {print \$3}"' 2>&1) || true
 if [ "${nspam:-0}" -ge 1 ] 2>/dev/null; then ok "sa-learn teaches Bayes ($nspam spam message learned)"; else fail "sa-learn did not learn: nspam='$nspam'"; fi

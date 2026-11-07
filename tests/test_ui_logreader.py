@@ -138,3 +138,14 @@ def test_viewing_opens_nothing_outside_the_log_directory(tmp_path, monkeypatch):
     logreader.summary(log_dir)
     logreader.what_if(log_dir, 1.0, 5.0)
     assert opened and all(os.path.dirname(p).replace("\\", "/").endswith("logs") for p in opened)
+
+
+def test_summary_groups_the_latest_record_per_message_by_microsoft_scl(tmp_path):
+    write(tmp_path, "decisions.jsonl", [
+        rec(1, ms_scl=9, score=6.0, ts="2026-11-01T00:00:00Z"), rec(1, ms_scl=9, score=8.0, ts="2026-11-02T00:00:00Z"),
+        rec(2, ms_scl=5, score=2.0), rec(3, ms_scl=5, score=3.0), rec(4, ms_scl=None, score=-1.0), rec(5, score=None),
+    ])
+    per_scl = logreader.summary(tmp_path)["per_scl"]
+    assert list(per_scl) == [9, 5, "none"]
+    assert per_scl[9] == (1, 8.0, 8.0)  # the second record of message 1 replaces the first
+    assert per_scl[5] == (2, 2.5, 3.0) and per_scl["none"] == (1, -1.0, -1.0)

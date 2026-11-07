@@ -185,9 +185,26 @@ def summary(log_dir: Path) -> dict:
             bucket = int(score // 1)
             hist[bucket] = hist.get(bucket, 0) + 1
     return {
+        "per_scl": _per_scl(log_dir),
         "per_day": dict(sorted(per_day.items(), reverse=True)),
         "histogram": dict(sorted(hist.items())),
         "skipped": stats.skipped,
+    }
+
+
+def _per_scl(log_dir: Path) -> dict:
+    """Microsoft SCL -> (messages, average score, highest score), one (latest) record per message; unknown last."""
+    latest: dict = {}
+    for record in iter_records(log_dir):  # newest first: the first record seen for a message is the latest
+        score = record.get("score")
+        if isinstance(score, (int, float)) and record.get("message_id") not in latest:
+            latest[record.get("message_id")] = (record.get("ms_scl"), float(score))
+    groups: dict = {}
+    for scl, score in latest.values():
+        groups.setdefault(scl, []).append(score)
+    order = sorted((k for k in groups if k is not None), reverse=True) + ([None] if None in groups else [])
+    return {
+        ("none" if k is None else k): (len(groups[k]), sum(groups[k]) / len(groups[k]), max(groups[k])) for k in order
     }
 
 
