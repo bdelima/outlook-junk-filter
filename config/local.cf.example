@@ -1,0 +1,48 @@
+# Example SpamAssassin config for outlook-junk-filter.
+# Copy to /opt/outlook-junk-filter/config/local.cf (mounted at /config/local.cf).
+# The job passes --siteconfigpath /config to every SpamAssassin call.
+
+# The original message comes back with X-Spam- headers added; the job reads them.
+report_safe 0
+
+# Bayes lives in the state mount. It stays inactive until it has learned
+# 200 spam and 200 non-spam messages, and v1 has no training loop.
+bayes_path /state/bayes/bayes
+
+# The job reads this header to log the first untrusted relay IP.
+add_header all RelaysUntrusted _RELAYSUNTRUSTED_
+
+# Trust path: add `trusted_networks` for the Microsoft hops that appear in the
+# Received headers of your own samples (see the README, "Tune it"). Set only
+# trusted_networks and let internal_networks default to it.
+
+# alternating-case lettering in the subject (pAsSwOrD style)
+header   LOCAL_SUBJ_ALTCASE   Subject =~ /[a-z][A-Z][a-z][A-Z]/
+describe LOCAL_SUBJ_ALTCASE   Subject has alternating-case lettering
+score    LOCAL_SUBJ_ALTCASE   1.5
+
+# display name claims Microsoft, address is not a Microsoft domain
+header   __LOCAL_NAME_MSFT    From:name =~ /\b(?:microsoft|outlook|office ?365|onedrive)\b/i
+header   __LOCAL_ADDR_MSFT    From:addr =~ /@(?:[a-z0-9-]+\.)*(?:microsoft|microsoftonline|outlook|live|office|office365)\.com$/i
+meta     LOCAL_MSFT_NAME_BAD_ADDR  __LOCAL_NAME_MSFT && !__LOCAL_ADDR_MSFT
+describe LOCAL_MSFT_NAME_BAD_ADDR  Display name says Microsoft, address is not
+score    LOCAL_MSFT_NAME_BAD_ADDR  3.0
+
+# random-looking sender: 8+ consonants in a row, or 14+ letters and digits
+header   LOCAL_FROM_RANDOM    From:addr =~ /^(?:[^aeiou@]{8,}|[a-z0-9]{14,})@/i
+describe LOCAL_FROM_RANDOM    Sender local part looks random
+score    LOCAL_FROM_RANDOM    1.5
+
+# legitimate bulk senders usually include List-Unsubscribe
+header   LOCAL_HAS_LISTUNSUB  exists:List-Unsubscribe
+describe LOCAL_HAS_LISTUNSUB  Has a List-Unsubscribe header
+score    LOCAL_HAS_LISTUNSUB  -1.0
+
+# Microsoft recorded a failed or missing authentication check
+header   LOCAL_MS_AUTH_FAIL   Authentication-Results =~ /\b(?:dkim|dmarc|spf)=(?:fail|none|softfail|temperror|permerror)\b/i
+describe LOCAL_MS_AUTH_FAIL   Microsoft's Authentication-Results shows a failure
+score    LOCAL_MS_AUTH_FAIL   1.0
+
+# senders to always leave alone; must pass DKIM or SPF to count
+whitelist_auth *@redditmail.com
+whitelist_auth *@substack.com

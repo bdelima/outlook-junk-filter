@@ -1,0 +1,22 @@
+# Portainer stack for outlook-junk-filter. No ports are published and no network is
+# declared. Set the variables in Portainer's Environment variables panel, not in a
+# .env file. Create the host directories once (owned by uid/gid 1000, mode 700):
+#   sudo install -d -m 700 -o 1000 -g 1000 /opt/outlook-junk-filter /opt/outlook-junk-filter/state /opt/outlook-junk-filter/config
+services:
+  outlook-junk-filter:
+    image: bdelima/outlook-junk-filter:latest
+    container_name: outlook-junk-filter
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      - TZ=America/New_York
+      - OJF_CLIENT_ID=${OJF_CLIENT_ID}
+      - OJF_INTERVAL_SECONDS=${OJF_INTERVAL_SECONDS}
+      - OJF_MODE_LIVE=${OJF_MODE_LIVE}
+      - OJF_MODE_OUTLOOK=${OJF_MODE_OUTLOOK}
+      - OJF_DELETE_MODE=${OJF_DELETE_MODE}
+      - OJF_DELETE_THRESHOLD=${OJF_DELETE_THRESHOLD}
+      - OJF_MAX_DELETES_PER_RUN=${OJF_MAX_DELETES_PER_RUN}
+    volumes:
+      - /opt/outlook-junk-filter/state:/state
+      - /opt/outlook-junk-filter/config:/config

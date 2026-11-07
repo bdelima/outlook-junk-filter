@@ -1,0 +1,16 @@
+Received: from mail.sender-host.invalid (mail.sender-host.invalid [192.0.2.55])
+	by example-mx.invalid with ESMTP id 1234567890; Fri, 6 Nov 2026 10:00:00 +0000
+From: "Microsoft Account Team" <xkqzvbnmtrwp@sender-host.invalid>
+To: someone@example.invalid
+Subject: yOuR AcCoUnT hAs BeEn LoCkEd
+Date: Fri, 6 Nov 2026 10:00:00 +0000
+Message-ID: <phish-0001@sender-host.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+
+Dear customer, we detected unusual sign-in activity on your account.
+Your account will be suspended in 24 hours unless you verify it now.
+
+Verify here: http://192.0.2.77/login/verify
+
+This is a synthetic test message. It is not real mail.

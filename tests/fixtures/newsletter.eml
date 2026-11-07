@@ -1,0 +1,20 @@
+Received: from mail.newsletter-host.invalid (mail.newsletter-host.invalid [192.0.2.88])
+	by example-mx.invalid with ESMTP id 987654321; Fri, 6 Nov 2026 09:00:00 +0000
+From: "Weekly Digest" <digest@newsletter-host.invalid>
+To: someone@example.invalid
+Subject: This week's reading list
+Date: Fri, 6 Nov 2026 09:00:00 +0000
+Message-ID: <news-0001@newsletter-host.invalid>
+List-Unsubscribe: <https://newsletter-host.invalid/unsubscribe?u=1>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+
+Hello,
+
+Here are this week's articles: a piece on gardening, one on bread baking, and a
+short history of the bicycle.
+
+You are receiving this because you subscribed. Unsubscribe any time using the
+link in the headers.
+
+This is a synthetic test message. It is not real mail.
