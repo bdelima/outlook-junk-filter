@@ -54,6 +54,13 @@ else
   fail "read-only root filesystem check"
 fi
 
+# 3b. the job itself imports on the image's Python (msal, requests), and a missing client id exits with a message
+if docker run --rm --read-only --user 1000:1000 -v "$state:/state" --entrypoint python "$IMAGE" -c 'import outlook_junk_filter.__main__, msal, requests; print("imports ok")' >/dev/null 2>&1; then ok "the job and its dependencies import"; else fail "the job does not import on this image"; fi
+set +e
+msg=$(docker run --rm --read-only --user 1000:1000 -v "$state:/state" "$IMAGE" 2>&1); code=$?
+set -e
+if [ "$code" = 2 ] && echo "$msg" | grep -q OJF_CLIENT_ID; then ok "exits with a clear message when OJF_CLIENT_ID is missing"; else fail "missing client id: exit $code: $msg"; fi
+
 # 4. the example config loads cleanly as uid 1000, /config read-only
 if out=$(selfcheck "$cfg_example" 1000:1000 "$state" lint 2>&1); then ok "example config lints cleanly as uid 1000 ($out)"; else fail "example config lint: $out"; fi
 

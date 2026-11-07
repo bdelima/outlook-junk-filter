@@ -53,6 +53,7 @@ jobs:
               echo "== $pkg"
               grep -hE "^(License|Copyright):" /usr/share/doc/$pkg/copyright 2>/dev/null | sort | uniq -c | sort -rn | head -6
             done
+            echo "== spamassassin copyright"; grep -iE -m6 "apache|^license|licensed" /usr/share/doc/spamassassin/copyright
             echo "== python"; python --version; python -c "import sys; print(sys.version)"
             cat /etc/debian_version
           '
