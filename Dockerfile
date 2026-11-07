@@ -46,6 +46,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ /app/src/
+COPY rules/ /app/rules/
 COPY LICENSE ATTRIBUTION.md /app/
 
 # The release version, read-only for the operator: label above and APP_VERSION must equal the tag.

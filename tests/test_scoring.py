@@ -87,3 +87,12 @@ def test_microsoft_scl_is_read_from_the_header_and_bad_values_are_ignored():
     # the first (latest-added) header wins
     raw = b"X-MS-Exchange-Organization-SCL: 9\r\nX-MS-Exchange-Organization-SCL: 1\r\nSubject: x\r\n\r\nbody"
     assert scoring.parse_output(OUT, raw).ms_scl == 9
+
+
+def test_the_shipped_rules_file_is_included_only_when_it_exists(tmp_path):
+    rules = tmp_path / "ojf-rules.cf"
+    assert "--cf" not in " ".join(scoring._command([], "/config", str(rules)))
+    rules.write_text("# rules\n", encoding="utf-8")
+    command = scoring._command(["--lint"], "/config", str(rules))
+    assert f"--cf=include {rules}" in command and command[-1] == "--lint"
+    assert scoring.RULES_FILE == "/app/rules/ojf-rules.cf"

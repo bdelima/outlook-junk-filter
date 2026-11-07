@@ -12,6 +12,7 @@ from pathlib import Path
 
 TIMEOUT_SECONDS = 120
 CONFIG_DIR = "/config"
+RULES_FILE = "/app/rules/ojf-rules.cf"  # extra rules shipped in the image, loaded on every run
 
 
 class ScoreError(Exception):
@@ -40,8 +41,11 @@ def _env(state_dir: Path) -> dict:
     return env
 
 
-def _command(extra: list, config_dir: str) -> list:
-    return ["spamassassin", "--nocreate-prefs", "--siteconfigpath", config_dir, *extra]
+def _command(extra: list, config_dir: str, rules_file: str = RULES_FILE) -> list:
+    command = ["spamassassin", "--nocreate-prefs", "--siteconfigpath", config_dir]
+    if os.path.isfile(rules_file):
+        command += [f"--cf=include {rules_file}"]
+    return [*command, *extra]
 
 
 def lint(state_dir: Path, config_dir: str = CONFIG_DIR) -> tuple:

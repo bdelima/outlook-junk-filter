@@ -96,6 +96,19 @@ else
 fi
 if echo "$plain_uris" | grep -q "cleaned uri: https://ojf-synthetic-target.shop/offer?id=1"; then ok "plain control fixture yields the same target directly"; else fail "plain control fixture: no target uri"; fi
 
+# 6c. the shipped rules (rules/ojf-rules.cf) catch ED spam that names no drug, and leave a harmless health newsletter alone
+edspam=$(selfcheck "$cfg_offline" 1000:1000 "$state" score /fixtures/ed-spam.eml 2>&1) || { fail "ed-spam score: $edspam"; edspam=""; }
+health=$(selfcheck "$cfg_offline" 1000:1000 "$state" score /fixtures/health-newsletter.eml 2>&1) || { fail "health newsletter score: $health"; health=""; }
+if echo "$edspam" | grep -q "OJF_ED_SPAM"; then ok "shipped rule OJF_ED_SPAM fires on the ED-spam fixture"; else fail "OJF_ED_SPAM did not fire: $edspam"; fi
+if [ -n "$health" ] && ! echo "$health" | grep -q "OJF_ED_SPAM"; then ok "OJF_ED_SPAM stays quiet on a harmless health newsletter"; else fail "OJF_ED_SPAM fired on the health newsletter: $health"; fi
+# a rule can be switched off from /config/local.cf
+cfg_off="$work/cfg-off"; mkdir "$cfg_off"; chmod 777 "$cfg_off"
+cp "$cfg_offline/local.cf" "$cfg_off/local.cf"; printf 'score OJF_ED_SPAM 0
+' >> "$cfg_off/local.cf"
+off=$(selfcheck "$cfg_off" 1000:1000 "$state" score /fixtures/ed-spam.eml 2>&1) || off=""
+on_score=${edspam#score=}; on_score=${on_score%% *}; off_score=${off#score=}; off_score=${off_score%% *}
+if [ -n "$off" ] && awk -v a="$on_score" -v b="$off_score" 'BEGIN { exit !(a - b >= 2.9) }'; then ok "score OJF_ED_SPAM 0 in /config/local.cf switches the rule off ($on_score -> $off_score)"; else fail "could not switch the rule off: on=$on_score off=$off_score"; fi
+
 # 7. sa-learn teaches Bayes into /state/bayes (what the review page's "teach" actions run), as uid 1000 on a read-only root
 nspam=$(docker run --rm --read-only --user 1000:1000 -v "$state:/state" -v "$cfg_offline:/config" -v "$PWD/tests/fixtures:/fixtures:ro"   -e HOME=/state/home -e TMPDIR=/state/tmp --entrypoint sh "$IMAGE" -c   'mkdir -p /state/home /state/tmp /state/bayes && sa-learn --spam --single --siteconfigpath /config < /fixtures/phishing.eml >/dev/null 2>&1 && sa-learn --dump magic --siteconfigpath /config 2>/dev/null | awk "/non-token data: nspam/ {print \$3}"' 2>&1) || true
 if [ "${nspam:-0}" -ge 1 ] 2>/dev/null; then ok "sa-learn teaches Bayes ($nspam spam message learned)"; else fail "sa-learn did not learn: nspam='$nspam'"; fi
