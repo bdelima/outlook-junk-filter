@@ -1,0 +1,14 @@
+# outlook-junk-filter: extra SpamAssassin rules, shipped in the image. They are installed next to the stock rules
+# (as 99_ojf.cf), so they load before /config/local.cf, which can override any score here.
+#
+# Erectile-dysfunction spam that avoids drug names. It describes the effect ("rock-hard for hours", "blood flow",
+# "no prescriptions") instead of naming a pill, so the stock pharmacy rules never fire. Two of the three groups below
+# must match; any one alone (a health newsletter that says "blood flow") scores nothing.
+
+header   __OJF_ED_SUBJ   Subject =~ /\b(?:rock[- ]?(?:hard|solid)|no prescriptions?|male enhancement|potency|stay(?:ing)? hard|blue pills?|bedroom performance)\b/i
+body     __OJF_ED_ACT    /\b(?:rock[- ]?(?:hard|solid)|rigid|firmness|go(?:ing)? soft|sudden softness|weak blood flow|bedroom performance|last(?:ing)? for hours)\b/i
+body     __OJF_ED_PITCH  /\b(?:(?:prescription )?(?:blue )?pills?\b.{0,80}\b(?:side effects?|headaches?|dependency)|no (?:dangerous )?side effects?|no prescriptions?|blood flow|leaked (?:clinical )?(?:report|study)|(?:morning )?(?:baking soda|recipe) (?:trick|secret))\b/i
+
+meta     OJF_ED_SPAM     (__OJF_ED_SUBJ + __OJF_ED_ACT + __OJF_ED_PITCH) >= 2
+describe OJF_ED_SPAM     Erectile-dysfunction pitch without naming a drug
+score    OJF_ED_SPAM     3.0

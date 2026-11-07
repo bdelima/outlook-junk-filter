@@ -1,0 +1,24 @@
+Received: from mail.sender-host.invalid (mail.sender-host.invalid
+ [192.0.2.55]) by example-mx.invalid with ESMTP id 1; Sat, 7 Nov 2026 10:00:00
+ +0000
+Authentication-Results: spf=pass smtp.mailfrom=sender-host.invalid; dkim=pass
+ header.d=sender-host.invalid; dmarc=pass header.from=sender-host.invalid
+X-MS-Exchange-Organization-SCL: 8
+From: "Morning Health" <desk@sender-host.invalid>
+Reply-To: reply@other-host.invalid
+To: someone@example.invalid
+Subject: No prescriptions needed: the secret to staying rock-hard for hours
+Date: Sat, 07 Nov 2026 10:00:00 +0000
+Message-ID: <ed-spam@sender-host.invalid>
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>If you have ever dealt with weak blood flow, read this now.</p=
+><p>Millions of men take prescription pills that cause headaches and dependen=
+cy.</p><p>A leaked clinical report describes a morning baking soda trick that=
+ keeps you rock-solid for hours.</p><p>No dangerous side effects.</p><p><a hr=
+ef=3D"https://na01.safelinks.protection.outlook.com/?url=3Dhttp%3A%2F%2Fojf-s=
+ynthetic-target.shop%2Foffer&amp;data=3D05%7C02%7C%7C0123456789abcdef%7CUnkno=
+wn%7C0%7C&amp;sdata=3DAAAA%3D&amp;reserved=3D0" originalsrc=3D"http://ojf-syn=
+thetic-target.shop/offer">Watch the video here</a></p></body></html>
