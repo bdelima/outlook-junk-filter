@@ -41,6 +41,12 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
     restored = RestoredList(cfg.state_dir)
     graph = GraphClient(auth.access_token, log=log)
     ai = AiClient(cfg.ai_url, cfg.ai_model, cfg.ai_timeout) if cfg.ai_url else None
+    if ai is not None:  # say now whether the AI server answers, not in the middle of the first scan
+        level, detail = ai.check()
+        if level == "error":
+            log.error("ERROR AI scoring server %s is not usable: %s; AI scoring is skipped until it answers", cfg.ai_url, detail)
+        else:
+            getattr(log, level)("AI scoring server %s: %s", cfg.ai_url, detail)
 
     def score_fn(raw: bytes):
         return scoring.score(raw, cfg.state_dir, config_dir)

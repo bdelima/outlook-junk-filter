@@ -137,10 +137,30 @@ def parse_reply(content: str) -> AiResult:
 
 class AiClient:
     def __init__(self, base_url: str, model: str, timeout: int = 60, session=None):
-        self._url = base_url.rstrip("/") + "/chat/completions"
+        self._base = base_url.rstrip("/")
+        self._url = self._base + "/chat/completions"
         self._model = model
         self._timeout = timeout
         self._session = session or requests.Session()
+
+    def check(self) -> tuple:
+        """Ask the server which models it serves. Returns (log level, detail): a startup self-check, never raises."""
+        try:
+            resp = self._session.get(self._base + "/models", timeout=min(self._timeout, 10))
+        except requests.RequestException as exc:
+            return "error", f"{type(exc).__name__}: {exc}"
+        if resp.status_code == 404:
+            return "info", "answered (it does not list its models)"
+        if resp.status_code != 200:
+            return "error", f"HTTP {resp.status_code}: {(resp.text or '')[:100]}"
+        try:
+            ids = [m.get("id") for m in resp.json().get("data", [])]
+        except (ValueError, AttributeError, TypeError):
+            return "info", "answered (the model list is unreadable)"
+        if self._model in ids:
+            return "info", f"model {self._model} is available"
+        listed = ", ".join(str(i) for i in ids) or "none"
+        return "warning", f"answered, but model {self._model} is not in its list (listed: {listed})"
 
     def rate(self, sender: str, subject: str, text: str) -> AiResult:
         payload = {
