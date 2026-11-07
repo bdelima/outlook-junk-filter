@@ -9,6 +9,11 @@ report_safe 0
 # 200 spam and 200 non-spam messages, and v1 has no training loop.
 bayes_path /state/bayes/bayes
 
+# SpamAssassin's own auto-learn (on by default): it trains Bayes from messages that score far enough from the
+# middle, by its own thresholds, whenever the job scores a message. Set 0 to turn it off. Teaching a message
+# by hand from the review page works either way.
+bayes_auto_learn 1
+
 # The job reads this header to log the first untrusted relay IP.
 add_header all RelaysUntrusted _RELAYSUNTRUSTED_
 

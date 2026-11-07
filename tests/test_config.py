@@ -109,3 +109,19 @@ def test_quarantine_settings():
     assert cfg.quarantine_folder == "Suspect" and cfg.quarantine_retention_days == 30 and not cfg.quarantine_enabled
     bad = load(OJF_QUARANTINE_RETENTION_DAYS="soon", OJF_QUARANTINE_ENABLED="maybe")
     assert bad.quarantine_retention_days == 7 and bad.quarantine_enabled and len(bad.problems) == 2
+
+
+def test_review_page_port():
+    assert load().ui_port == 60888
+    assert load(OJF_UI_PORT="8088").ui_port == 8088
+    for bad in ("0", "70000", "web"):
+        cfg = load(OJF_UI_PORT=bad)
+        assert cfg.ui_port == 60888 and any("OJF_UI_PORT" in p for p in cfg.problems)
+
+
+def test_csrf_check_is_off_by_default_and_configurable():
+    assert load().ui_csrf is False
+    assert load(OJF_UI_CSRF="on").ui_csrf is True
+    assert load(OJF_UI_CSRF="off").ui_csrf is False
+    bad = load(OJF_UI_CSRF="maybe")
+    assert bad.ui_csrf is False and any("OJF_UI_CSRF" in p for p in bad.problems)

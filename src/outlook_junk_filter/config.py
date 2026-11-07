@@ -21,6 +21,7 @@ MIN_INTERVAL = 60
 DEFAULT_KEEP_PATTERN = r"^USER_IN_.*(WHITE|WELCOME)LIST"
 DEFAULT_QUARANTINE_FOLDER = "Quarantined"
 DEFAULT_RETENTION_DAYS = 7
+DEFAULT_UI_PORT = 60888
 _TRUE = ("1", "true", "yes", "on")
 _FALSE = ("0", "false", "no", "off")
 
@@ -65,6 +66,8 @@ class Config:
     quarantine_folder: str = DEFAULT_QUARANTINE_FOLDER
     quarantine_threshold: float | None = None
     quarantine_retention_days: int = DEFAULT_RETENTION_DAYS
+    ui_port: int = DEFAULT_UI_PORT
+    ui_csrf: bool = False
     version: str = "dev"
     # problems found while parsing; logged at startup and on every run
     problems: list = field(default_factory=list)
@@ -102,6 +105,8 @@ class Config:
             "quarantine_folder": self.quarantine_folder,
             "quarantine_threshold": self.quarantine_threshold,
             "quarantine_retention_days": self.quarantine_retention_days,
+            "ui_port": self.ui_port,
+            "ui_csrf": self.ui_csrf,
             "keep_rule_pattern": self.keep_pattern.pattern,
             "version": self.version,
         }
@@ -165,6 +170,27 @@ def load(env=None) -> Config:
             )
             retention = DEFAULT_RETENTION_DAYS
 
+    ui_port = DEFAULT_UI_PORT
+    raw = _get(env, "OJF_UI_PORT")
+    if raw is not None:
+        try:
+            ui_port = int(raw)
+            if not 1 <= ui_port <= 65535:
+                raise ValueError
+        except ValueError:
+            problems.append(f"OJF_UI_PORT={raw!r} is not a port number; using {DEFAULT_UI_PORT}")
+            ui_port = DEFAULT_UI_PORT
+
+    ui_csrf = False  # off by default: the page is meant for a private LAN, behind a proxy the user controls
+    raw = _get(env, "OJF_UI_CSRF")
+    if raw is not None:
+        if raw.lower() in _TRUE:
+            ui_csrf = True
+        elif raw.lower() in _FALSE:
+            ui_csrf = False
+        else:
+            problems.append(f"OJF_UI_CSRF={raw!r} is not on or off; using off")
+
     # --- thresholds and delete mode -----------------------------------------
     delete_mode = None
     delete_mode_problem = None
@@ -214,6 +240,8 @@ def load(env=None) -> Config:
         quarantine_folder=quarantine_folder,
         quarantine_threshold=quarantine_threshold,
         quarantine_retention_days=retention,
+        ui_port=ui_port,
+        ui_csrf=ui_csrf,
         version=_get(env, "APP_VERSION") or "dev",
         problems=problems,
         act_problems=act_problems,

@@ -57,6 +57,9 @@ ENV APP_VERSION=${VERSION} \
 
 USER 1000:1000
 
+# the review page (OJF_UI_PORT changes it)
+EXPOSE 60888
+
 HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=3 \
   CMD ["python", "-m", "outlook_junk_filter.healthcheck"]
 

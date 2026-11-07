@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,7 @@ class AccountAuth:
         self._path = Path(state_dir) / "tokens" / f"{account}.json"
         self._log = log
         self._touch = touch_health
+        self._lock = threading.RLock()  # the job and the review page share this token cache
         self._cache = msal.SerializableTokenCache()
         if self._path.exists():
             try:
@@ -54,6 +56,10 @@ class AccountAuth:
         os.chmod(self._path, 0o600)
 
     def silent(self) -> SilentResult:
+        with self._lock:
+            return self._silent()
+
+    def _silent(self) -> SilentResult:
         accounts = self._app.get_accounts()
         if not accounts:
             return SilentResult(needs_signin=True)
