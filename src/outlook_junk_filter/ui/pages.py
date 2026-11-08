@@ -65,7 +65,7 @@ def _score(value) -> str:
     return f"{value:.1f}" if isinstance(value, (int, float)) else "-"
 
 
-def decisions_page(page, params: dict, info: dict) -> str:
+def decisions_page(page, params: dict, info: dict, token: str = "", can_act: bool = False) -> str:
     form = (
         '<form method="get" action="/" class="filters">'
         f'<label>Decision <select name="decision">{_options(("",) + DECISIONS, params.get("decision", ""))}</select></label> '
@@ -83,7 +83,8 @@ def decisions_page(page, params: dict, info: dict) -> str:
         detail = {"id": record.get("message_id", ""), "ts": record.get("ts", "")}
         rows.append(
             "<tr>"
-            f"<td>{link('/message', detail, record.get('ts', ''))}</td>"
+            + (_checkbox(record) if can_act else "")
+            + f"<td>{link('/message', detail, record.get('ts', ''))}</td>"
             f"<td>{esc(record.get('from_addr'))}</td>"
             f"<td>{esc(record.get('subject'))}</td>"
             f"<td class=\"num\">{esc(_score(record.get('score')))}</td>"
@@ -92,11 +93,23 @@ def decisions_page(page, params: dict, info: dict) -> str:
             f"<td>{esc(record.get('reason'))}</td></tr>"
         )
     table = (
-        "<table><thead><tr><th>Time</th><th>Sender</th><th>Subject</th><th>Score</th><th>MS SCL</th>"
+        "<table><thead><tr>"
+        + ('<th><input type="checkbox" id="select-all" title="Select all on this page"></th>' if can_act else "")
+        + "<th>Time</th><th>Sender</th><th>Subject</th><th>Score</th><th>MS SCL</th>"
         "<th>Decision</th><th>Reason</th></tr></thead><tbody>"
-        + ("".join(rows) or '<tr><td colspan="7">No decisions to show.</td></tr>')
+        + ("".join(rows) or f'<tr><td colspan="{8 if can_act else 7}">No decisions to show.</td></tr>')
         + "</tbody></table>"
     )
+    if can_act:
+        table = (
+            '<form method="post" action="/batch">'
+            f'<input type="hidden" name="token" value="{esc(token)}">'
+            '<p><button type="submit">Batch actions for the selected&hellip;</button> '
+            '<span class="meta">Tick rows, then choose what to do with them.</span></p>'
+            + table
+            + "</form>"
+            '<script src="/static/batch.js"></script>'
+        )
     current = int(params.get("page", "1") or 1)
     pages = max(1, -(-page.total // PER_PAGE))
     base = {k: v for k, v in params.items() if k != "page"}
@@ -109,6 +122,14 @@ def decisions_page(page, params: dict, info: dict) -> str:
     pager += link("/export.csv", base, "Export CSV") + "</p>"
     skipped = f'<p class="meta">{esc(page.skipped)} malformed line(s) skipped.</p>' if page.skipped else ""
     return layout("Decisions", form + pager + table + pager + skipped, header_block(info))
+
+
+def _checkbox(record: dict) -> str:
+    """A tick box for a row that a batch action could apply to; the value names the exact record."""
+    if not (actions_module.eligible("teach-spam", record) or actions_module.eligible("restore-junk", record)):
+        return "<td></td>"
+    value = f"{record.get('ts', '')}|{record.get('message_id', '')}"
+    return f'<td><input type="checkbox" name="sel" value="{esc(value)}"></td>'
 
 
 def _options(values, selected) -> str:
@@ -264,3 +285,70 @@ def csv_rows(records):
             ]
         )
         yield buffer.getvalue()
+
+
+BATCH_TEXT = {
+    "teach-spam": "Teach Bayes: spam",
+    "teach-ham": "Teach Bayes: not spam",
+    "restore-junk": "Restore to Junk",
+    "restore-inbox": "Restore to Inbox",
+}
+
+
+def batch_page(records: list, missing: int, keys: list, token: str, info: dict) -> str:
+    """Show the selected rows and the actions that apply to at least one of them."""
+    hidden = f'<input type="hidden" name="token" value="{esc(token)}">' + "".join(
+        f'<input type="hidden" name="sel" value="{esc(k)}">' for k in keys
+    )
+    buttons = []
+    for action, text in BATCH_TEXT.items():
+        count = sum(1 for r in records if actions_module.eligible(action, r))
+        if count:
+            buttons.append(
+                f'<button type="submit" name="action" value="{esc(action)}">{esc(text)} ({count} of {len(records)})</button>'
+            )
+    rows = "".join(
+        "<tr>"
+        f"<td>{esc(r.get('ts'))}</td><td>{esc(r.get('from_addr'))}</td><td>{esc(r.get('subject'))}</td>"
+        f"<td>{esc(r.get('decision'))}</td><td>{esc(r.get('folder') or '-')}</td></tr>"
+        for r in records
+    )
+    note = f'<p class="error">{esc(missing)} selected row(s) are no longer in the log and are left out.</p>' if missing else ""
+    if buttons:
+        actions = (
+            f'<form method="post" action="/batch">{hidden}'
+            f"<p>{' '.join(buttons)}</p></form>"
+            '<p class="meta">Each button applies only to the rows it fits; the count shows how many. '
+            "Teaching runs one message at a time, so a large selection takes a while.</p>"
+        )
+    else:
+        actions = "<p>None of the selected messages can be taught or restored (they are gone from Outlook or still in Junk).</p>"
+    body = (
+        f"<p>{esc(len(records))} message(s) selected.</p>"
+        + note
+        + actions
+        + "<table><thead><tr><th>Time</th><th>Sender</th><th>Subject</th><th>Decision</th><th>Folder</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table><p>{link('/', {}, 'Back to the decisions')}</p>"
+    )
+    return layout("Batch actions", body, header_block(info))
+
+
+def batch_result_page(action: str, results: list, missing: int, info: dict) -> str:
+    done = sum(1 for _, ok, _ in results if ok)
+    problems = [(r, m) for r, ok, m in results if not ok]
+    rows = "".join(
+        f"<tr><td>{esc(r.get('from_addr'))}</td><td>{esc(r.get('subject'))}</td><td>{esc(m)}</td></tr>" for r, m in problems
+    )
+    body = (
+        f"<p>{esc(BATCH_TEXT.get(action, action))}: {esc(done)} done, {esc(len(problems))} not done"
+        + (f", {esc(missing)} no longer in the log" if missing else "")
+        + ".</p>"
+        + (
+            "<h2>Not done</h2><table><thead><tr><th>Sender</th><th>Subject</th><th>Why</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+            if problems
+            else ""
+        )
+        + f"<p>{link('/', {}, 'Back to the decisions')}</p>"
+    )
+    return layout("Batch result", body, header_block(info))

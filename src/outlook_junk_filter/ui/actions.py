@@ -40,6 +40,18 @@ def can_restore(record: dict) -> bool:
     return can_teach(record) and record.get("folder") not in RESTORABLE_FROM_EXCLUDED
 
 
+BATCH_ACTIONS = ("teach-spam", "teach-ham", "restore-junk", "restore-inbox")
+
+
+def eligible(action: str, record: dict) -> bool:
+    """Whether a batch action applies to this record (teaching needs the message in Outlook; restoring needs Deleted Items or quarantine)."""
+    if action in ("teach-spam", "teach-ham"):
+        return can_teach(record)
+    if action in ("restore-junk", "restore-inbox"):
+        return can_restore(record)
+    return False
+
+
 class Actions:
     def __init__(self, graph, restored, state_dir: Path, config_dir: Path, run=subprocess.run, now=None):
         self._graph = graph
@@ -157,3 +169,32 @@ class Actions:
         self._restored.add(record.get("internet_message_id") or "")
         self._record("restore", message_id, destination)
         return f"Restored to {destination.capitalize()}. The job will keep it."
+
+    # ------------------------------------------------------------------ batch
+
+    def batch(self, action: str, records: list) -> list:
+        """Run one action on many records. Returns (record, ok, message) per record; one failure never stops the rest."""
+        if action not in BATCH_ACTIONS:
+            raise ActionError("Unknown action.")
+        results, seen = [], set()
+        for record in records:
+            target = record.get("current_message_id") or ""
+            if not eligible(action, record):
+                results.append((record, False, "Skipped: this action does not apply to the message's current state."))
+                continue
+            if target in seen:
+                results.append((record, False, "Skipped: the same message was selected more than once."))
+                continue
+            seen.add(target)
+            try:
+                if action == "teach-spam":
+                    message = self.teach(record, spam=True)
+                elif action == "teach-ham":
+                    message = self.teach(record, spam=False)
+                else:
+                    message = self.restore(record, "junk" if action == "restore-junk" else "inbox")
+            except ActionError as exc:
+                results.append((record, False, str(exc)))
+                continue
+            results.append((record, True, message))
+        return results

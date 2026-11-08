@@ -149,6 +149,19 @@ def find(log_dir: Path, message_id: str, ts: str) -> dict | None:
     return None
 
 
+def find_many(log_dir: Path, keys) -> dict:
+    """The records for several (message_id, ts) pairs in one pass over the log; a pair that is not logged is absent."""
+    wanted = set(keys)
+    found = {}
+    for record in iter_records(log_dir):
+        key = (record.get("message_id"), record.get("ts"))
+        if key in wanted and key not in found:
+            found[key] = record
+            if len(found) == len(wanted):
+                break
+    return found
+
+
 def header(log_dir: Path, now: datetime | None = None) -> dict:
     """Records loaded, oldest and newest timestamps, and the age of the last record in seconds."""
     stats = Stats()

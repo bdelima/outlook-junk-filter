@@ -132,6 +132,12 @@ shows, because senders and subjects come from phishing mail.
     (see [Safe Links](#safe-links)), which breaks the sender's DKIM signature, so for those messages only SPF can pass.
   - **Restore** a message from the quarantine folder or Deleted Items to Junk or the Inbox. The job then keeps it and
     never rescores it.
+- **Batch actions** on the Decisions page: tick the rows (the box in the header ticks the whole page), press
+  *Batch actions for the selected*, and the next page lists the selection with the actions that fit: teach as spam,
+  teach as not spam, restore to Junk, restore to the Inbox. Each button shows how many of the selected rows it applies
+  to; the rest are skipped and listed with the reason, and one failure does not stop the others. Rows that are gone
+  from Outlook have no box. Teaching runs one message at a time, so a big selection takes a while. Each message is
+  recorded in `actions.jsonl` like a single action. At most 200 rows per batch.
 - **Auto-learn:** SpamAssassin's own `bayes_auto_learn` is on by default (`config/local.cf.example` carries the line, and
   `0` turns it off). Manual teaching works either way and corrects what auto-learn gets wrong.
 

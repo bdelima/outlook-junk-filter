@@ -18,6 +18,8 @@ from .actions import ActionError
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 4096
+MAX_BATCH_BODY = 256 * 1024
+MAX_BATCH = logreader.PER_PAGE * 2  # a page is 100 rows; allow some slack
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
     "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
@@ -103,6 +105,8 @@ def make_handler(ctx: Context):
                     self._confirm(params)
                 elif path == "/static/style.css":
                     self._send(200, (STATIC / "style.css").read_bytes(), "text/css; charset=utf-8")
+                elif path == "/static/batch.js":
+                    self._send(200, (STATIC / "batch.js").read_bytes(), "text/javascript; charset=utf-8")
                 else:
                     self._html(pages.layout("Not found", "<p>No such page.</p>"), 404)
             except BrokenPipeError:
@@ -117,7 +121,9 @@ def make_handler(ctx: Context):
             order = params.get("order", "desc") if params.get("order") in ("asc", "desc") else "desc"
             page = logreader.query(ctx.log_dir, filters_from(params), sort, order, page_no)
             view = {**params, "page": str(page_no), "sort": sort, "order": order}
-            self._html(pages.decisions_page(page, view, logreader.header(ctx.log_dir)))
+            self._html(
+                pages.decisions_page(page, view, logreader.header(ctx.log_dir), ctx.token, can_act=ctx.actions is not None)
+            )
 
         def _record(self, params):
             return logreader.find(ctx.log_dir, params.get("id", ""), params.get("ts", ""))
@@ -165,25 +171,64 @@ def make_handler(ctx: Context):
         # ------------------------------------------------------------ POST
 
         def do_POST(self):  # noqa: N802
-            if urlsplit(self.path).path != "/act":
+            path = urlsplit(self.path).path
+            if path not in ("/act", "/batch"):
                 self._html(pages.layout("Not found", "<p>No such page.</p>"), 404)
-                return
-            origin = self.headers.get("Origin")
-            if ctx.csrf and origin and urlsplit(origin).netloc != self.headers.get("Host", ""):
-                self._html(pages.layout("Refused", "<p>Cross-site request refused.</p>"), 403)
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = -1
-            if not 0 <= length <= MAX_BODY:
+            if not 0 <= length <= (MAX_BATCH_BODY if path == "/batch" else MAX_BODY):
                 self._html(pages.layout("Refused", "<p>Bad request.</p>"), 400)
                 return
-            form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode("utf-8", "replace")).items()}
+            # read the (size-capped) body before any refusal: answering and closing with unread data can reset the
+            # client's connection, so it would see a reset instead of the refusal
+            fields = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+            form = {k: v[0] for k, v in fields.items()}
+            origin = self.headers.get("Origin")
+            if ctx.csrf and origin and urlsplit(origin).netloc != self.headers.get("Host", ""):
+                self._html(pages.layout("Refused", "<p>Cross-site request refused.</p>"), 403)
+                return
             if ctx.csrf and not hmac.compare_digest(form.get("token", ""), ctx.token):
                 self._html(pages.layout("Refused", "<p>This form has expired. Go back and open the action again.</p>"), 403)
                 return
-            self._act(form)
+            if path == "/batch":
+                self._batch(form, fields.get("sel", []))
+            else:
+                self._act(form)
+
+        def _batch(self, form, selected):
+            info = logreader.header(ctx.log_dir)
+            back = pages.link("/", {}, "Back to the decisions")
+            if ctx.actions is None:
+                self._html(pages.result_page("Actions are only available while the job is running.", False, back, info), 503)
+                return
+            keys = []
+            for value in dict.fromkeys(selected):  # drop repeats, keep the order
+                ts, sep, message_id = value.partition("|")
+                if sep and ts and message_id:
+                    keys.append((message_id, ts))
+            if not keys:
+                self._html(pages.result_page("No rows were selected.", False, back, info), 400)
+                return
+            if len(keys) > MAX_BATCH:
+                self._html(pages.result_page(f"Too many rows selected (the limit is {MAX_BATCH}).", False, back, info), 400)
+                return
+            found = logreader.find_many(ctx.log_dir, keys)
+            records = [found[k] for k in keys if k in found]
+            missing = len(keys) - len(records)
+            action = form.get("action", "")
+            if not action:  # first step: show what was selected and what can be done with it
+                values = [f"{ts}|{message_id}" for message_id, ts in keys]
+                self._html(pages.batch_page(records, missing, values, ctx.token, info))
+                return
+            try:
+                results = ctx.actions.batch(action, records)
+            except ActionError as exc:
+                self._html(pages.result_page(str(exc), False, back, info), 400)
+                return
+            self._html(pages.batch_result_page(action, results, missing, info))
 
         def _act(self, form):
             info = logreader.header(ctx.log_dir)
