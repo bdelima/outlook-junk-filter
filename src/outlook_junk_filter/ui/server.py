@@ -202,7 +202,7 @@ def make_handler(ctx: Context):
         def do_POST(self):  # noqa: N802
             self._brand()
             path = urlsplit(self.path).path
-            if path not in ("/act", "/batch"):
+            if path not in ("/act", "/batch", "/delete-matching"):
                 self._html(pages.layout("Not found", "<p>No such page.</p>"), 404)
                 return
             try:
@@ -225,12 +225,38 @@ def make_handler(ctx: Context):
                 return
             if path == "/batch":
                 self._batch(form, fields.get("sel", []))
+            elif path == "/delete-matching":
+                self._delete_matching(form)
             else:
                 self._act(form)
 
+        def _delete_matching(self, form):
+            info = logreader.header(ctx.log_dir)
+            filters = {k: form[k] for k in pages.FILTER_KEYS if form.get(k)}
+            back = pages.link("/", filters, "Back to the decisions")
+            if ctx.actions is None:
+                self._html(pages.result_page("Actions are only available while the job is running.", False, back, info), 503)
+                return
+            pairs = [(r.get("message_id", ""), r.get("ts", "")) for r in logreader.all_matching(ctx.log_dir, filters_from(filters))]
+            if form.get("confirm") != "1":
+                self._html(pages.delete_matching_page(len(pairs), filters, ctx.token, info))
+                return
+            if str(len(pairs)) != form.get("expect", ""):  # rows arrived or went since the count was shown: ask again
+                note = f"The number of matching rows changed from {form.get('expect', '?')} to {len(pairs)}. Check it and confirm again."
+                self._html(pages.delete_matching_page(len(pairs), filters, ctx.token, info, note))
+                return
+            try:
+                removed = ctx.actions.delete_pairs(pairs)
+            except ActionError as exc:
+                self._html(pages.result_page(str(exc), False, back, info), 400)
+                return
+            ctx.stats_cache = (0.0, None)
+            self._html(pages.result_page(f"Removed {removed} row(s) from the log.", True, back, info))
+
         def _batch(self, form, selected):
             info = logreader.header(ctx.log_dir)
-            back = pages.link("/", {}, "Back to the decisions")
+            ret = pages.return_params(form.get("return", ""))
+            back = pages.link("/", ret, "Back to the decisions")
             if ctx.actions is None:
                 self._html(pages.result_page("Actions are only available while the job is running.", False, back, info), 503)
                 return
@@ -252,7 +278,7 @@ def make_handler(ctx: Context):
             if not action:  # first step: show what was selected and what can be done with it
                 values = [f"{ts}|{message_id}" for message_id, ts in keys]
                 chosen = form.get("choose", "")
-                self._html(pages.batch_page(records, missing, values, ctx.token, info, chosen if chosen in BATCH_ACTIONS else ""))
+                self._html(pages.batch_page(records, missing, values, ctx.token, info, chosen if chosen in BATCH_ACTIONS else "", ret))
                 return
             try:
                 results = ctx.actions.batch(action, records)
@@ -261,7 +287,7 @@ def make_handler(ctx: Context):
                 return
             if action == "delete-row":
                 ctx.stats_cache = (0.0, None)
-            self._html(pages.batch_result_page(action, results, missing, info))
+            self._html(pages.batch_result_page(action, results, missing, info, ret))
 
         def _act(self, form):
             info = logreader.header(ctx.log_dir)

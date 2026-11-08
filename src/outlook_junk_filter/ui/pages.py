@@ -9,7 +9,7 @@ from __future__ import annotations
 import csv
 import html
 import io
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
 from . import actions as actions_module
 from .logreader import PER_PAGE
@@ -31,6 +31,13 @@ NAV = (("/", "Decisions"), ("/summary", "Summary"), ("/whatif", "What-if"))
 
 
 APP_NAME = "SpamWatch"
+FILTER_KEYS = ("q", "decision", "date_from", "date_to", "score_min", "score_max")
+RETURN_KEYS = FILTER_KEYS + ("sort", "order")
+
+
+def return_params(raw: str) -> dict:
+    """The Decisions view to go back to, from a posted query string. Only known keys survive."""
+    return {k: v for k, v in parse_qsl(raw or "", keep_blank_values=False) if k in RETURN_KEYS and len(v) < 200}
 ICON = (
     '<svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" '
     'stroke-linecap="round" aria-hidden="true"><path d="M12 2.5l8 3v5.5c0 5-3.4 8.7-8 10-4.6-1.3-8-5-8-10V5.5z"/>'
@@ -214,15 +221,26 @@ def decisions_page(page, params: dict, info: dict, token: str = "", can_act: boo
             f'<button type="submit" name="choose" value="{esc(action)}" class="item">{esc(text)} <span class="n" data-n="{esc(group)}"></span></button>'
             for action, text, group in MENU
         )
+        ret = urlencode({k: v for k, v in params.items() if k in RETURN_KEYS and v})
+        delete_all = (
+            f' \u00b7 <button type="submit" form="delete-matching" class="btn danger-text">Delete all {esc(page.total)} matching\u2026</button>'
+            if page.total
+            else ""
+        )
         bar = (
             '<div class="selbar"><span class="selinfo"><strong id="selcount">0 selected</strong>'
             f'<details class="actions"><summary class="btn">Actions \u25be</summary><div class="menu">{menu}</div></details>'
             '<button type="button" class="btn" id="clear-selection">Clear</button></span>'
-            f'<span class="pager">{pager}</span></div>'
+            f'<span class="pager">{pager}{delete_all}</span></div>'
+        )
+        filters = "".join(
+            f'<input type="hidden" name="{k}" value="{esc(params.get(k, ""))}">' for k in FILTER_KEYS if params.get(k)
         )
         table = (
             '<form method="post" action="/batch">'
-            f'<input type="hidden" name="token" value="{esc(token)}">' + bar + table + "</form>"
+            f'<input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="return" value="{esc(ret)}">'
+            + bar + table + "</form>"
+            f'<form id="delete-matching" method="post" action="/delete-matching"><input type="hidden" name="token" value="{esc(token)}">{filters}</form>'
             f'<p class="pager below">{pager}</p><script src="/static/ui.js"></script>'
         )
     else:
@@ -448,9 +466,10 @@ BATCH_TEXT = {
 }
 
 
-def batch_page(records: list, missing: int, keys: list, token: str, info: dict, chosen: str = "") -> str:
+def batch_page(records: list, missing: int, keys: list, token: str, info: dict, chosen: str = "", ret: dict | None = None) -> str:
     """Show the selected rows and the actions that apply to at least one of them."""
-    hidden = f'<input type="hidden" name="token" value="{esc(token)}">' + "".join(
+    ret = ret or {}
+    hidden = f'<input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="return" value="{esc(urlencode(ret))}">' + "".join(
         f'<input type="hidden" name="sel" value="{esc(k)}">' for k in keys
     )
     buttons = []
@@ -499,12 +518,12 @@ def batch_page(records: list, missing: int, keys: list, token: str, info: dict, 
         + note
         + actions
         + '<div class="tablewrap"><table><thead><tr><th>Time</th><th>Sender</th><th>Subject</th><th>Decision</th><th>Folder</th></tr></thead>'
-        f"<tbody>{rows}</tbody></table></div><p>{link('/', {}, 'Back to the decisions')}</p>"
+        f"<tbody>{rows}</tbody></table></div><p>{link('/', ret, 'Back to the decisions')}</p>"
     )
     return layout("Batch actions", body, header_block(info), "/")
 
 
-def batch_result_page(action: str, results: list, missing: int, info: dict) -> str:
+def batch_result_page(action: str, results: list, missing: int, info: dict, ret: dict | None = None) -> str:
     done = sum(1 for _, ok, _ in results if ok)
     problems = [(r, m) for r, ok, m in results if not ok]
     rows = "".join(
@@ -520,6 +539,43 @@ def batch_result_page(action: str, results: list, missing: int, info: dict) -> s
             if problems
             else ""
         )
-        + f"<p>{link('/', {}, 'Back to the decisions')}</p>"
+        + f"<p>{link('/', ret or {}, 'Back to the decisions')}</p>"
     )
     return layout("Batch result", body, header_block(info))
+
+
+FILTER_LABELS = {
+    "q": "search",
+    "decision": "decision",
+    "date_from": "from",
+    "date_to": "to",
+    "score_min": "score at least",
+    "score_max": "score at most",
+}
+
+
+def delete_matching_page(count: int, params: dict, token: str, info: dict, note: str = "") -> str:
+    """Confirm deleting every row the current filter matches; the count is recomputed when the button is pressed."""
+    active = {k: params[k] for k in FILTER_KEYS if params.get(k)}
+    shown = (
+        "; ".join(f"{FILTER_LABELS[k]}: {v}" for k, v in active.items()) if active else "no filter, so every row in the log"
+    )
+    back = link("/", active, "Cancel")
+    if count == 0:
+        body = f"<p>No rows match ({esc(shown)}).</p><p>{link('/', active, 'Back to the decisions')}</p>"
+        return layout("Delete matching rows", body, header_block(info), "/")
+    hidden = (
+        f'<input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="confirm" value="1">'
+        f'<input type="hidden" name="expect" value="{esc(count)}">'
+        + "".join(f'<input type="hidden" name="{k}" value="{esc(v)}">' for k, v in active.items())
+    )
+    body = (
+        (f'<p class="error">{esc(note)}</p>' if note else "")
+        + f"<p><strong>Remove {esc(count)} row(s) from the log?</strong></p>"
+        f"<p>Every row that matches: {esc(shown)}.</p>"
+        "<p>Only the history rows on this page. The emails in Outlook and what the job has already decided are not touched. "
+        "This can't be undone.</p>"
+        f'<form method="post" action="/delete-matching">{hidden}'
+        f'<button type="submit" class="danger">Delete {esc(count)} rows</button> {back}</form>'
+    )
+    return layout("Delete matching rows", body, header_block(info), "/")

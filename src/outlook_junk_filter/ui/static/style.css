@@ -36,6 +36,7 @@ button:hover, .btn:hover { background: var(--soft); }
 button.danger { background: #dc2626; border-color: #dc2626; color: #fff; }
 button.danger-text { color: #dc2626; border-color: #dc2626; }
 .menu .item:last-child { color: #dc2626; border-top: 1px solid var(--line); border-radius: 0 0 4px 4px; margin-top: 3px; padding-top: 7px; }
+.selbar button.btn { padding: 2px 8px; }
 .danger-zone { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 

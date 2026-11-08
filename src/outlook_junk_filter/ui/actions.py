@@ -20,6 +20,7 @@ from ..logs import add_tombstones
 ALLOWLIST_FILE = "ojf-allowlist.cf"
 ACTIONS_LOG = "actions.jsonl"
 LEARN_TIMEOUT = 120
+AUDIT_LIMIT = 200  # above this many deleted rows, record one summary line instead of one per row
 
 _ADDRESS = re.compile(r"^[a-z0-9._%+'-]{1,64}@(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}$")
 _DOMAIN = re.compile(r"^(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}$")
@@ -179,21 +180,30 @@ class Actions:
 
     def delete_rows(self, records: list) -> list:
         """Hide rows from the log now; the daily prune removes them for good. Touches nothing in Outlook."""
-        pairs, results = [], []
+        pairs, seen, results = [], set(), []
         for record in records:
             pair = (record.get("message_id", ""), record.get("ts", ""))
-            if pair in pairs:
+            if pair in seen:
                 results.append((record, False, "Skipped: the same row was selected more than once."))
                 continue
+            seen.add(pair)
             pairs.append(pair)
             results.append((record, True, "Removed from the log."))
+        self.delete_pairs(pairs)
+        return results
+
+    def delete_pairs(self, pairs: list) -> int:
+        """Hide these (message id, time) rows. Returns how many."""
         try:
             add_tombstones(self._state / "logs", pairs)
         except OSError as exc:
             raise ActionError("Could not write to the log folder (is /state writable?).") from exc
-        for message_id, ts in pairs:
-            self._record("delete-row", message_id, ts)
-        return results
+        if len(pairs) <= AUDIT_LIMIT:
+            for message_id, ts in pairs:
+                self._record("delete-row", message_id, ts)
+        else:  # a bulk delete is one line, not thousands
+            self._record("delete-rows", "", f"{len(pairs)} rows")
+        return len(pairs)
 
     def delete_row(self, record: dict) -> str:
         self.delete_rows([record])

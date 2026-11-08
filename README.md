@@ -152,6 +152,9 @@ shows, because senders and subjects come from phishing mail.
 - **Delete from log** (batch menu, or on the message page): removes history rows from the review page only. Nothing
   in Outlook changes and the job keeps what it already decided. The rows disappear at once and are removed from the
   files by the next prune.
+- **Delete all matching:** with a filter applied (or none), *Delete all N matching…* in the bar above the table opens a
+  confirmation page that shows the count and the filter. It recounts when you confirm and asks again if the number
+  changed. Batch actions and deletes now return to your filtered, sorted view.
 - **Log pruning:** once a day (and at startup) the job drops decision rows older than `OJF_LOG_RETENTION_DAYS`
   (default 30; `0` keeps them), rows you deleted, and teach, restore and delete records of that age. Allowlist
   records are kept so a sender's chip stays. One line in the container log says what was removed.
