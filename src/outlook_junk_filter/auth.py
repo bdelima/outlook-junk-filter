@@ -11,7 +11,8 @@ from pathlib import Path
 import msal
 
 AUTHORITY = "https://login.microsoftonline.com/consumers"
-SCOPES = ["Mail.ReadWrite"]
+# MailboxSettings.ReadWrite is only for creating the Outlook categories the category hooks use
+SCOPES = ["Mail.ReadWrite", "MailboxSettings.ReadWrite"]
 HEALTH_EVERY = 60
 
 # refresh failures that mean the refresh token is no longer valid (a new sign-in is needed)

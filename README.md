@@ -46,7 +46,7 @@ deleted until you have reviewed the scores and switched to `act`.
 
 1. **Register an app** for personal Microsoft accounts: Microsoft's app registration portal, new registration,
    *Personal Microsoft accounts only*. Leave the redirect URI blank, set *Allow public client flows* to *Yes*, add the
-   Microsoft Graph **delegated** permission `Mail.ReadWrite`, and copy the *Application (client) ID*.
+   Microsoft Graph **delegated** permissions `Mail.ReadWrite` and `MailboxSettings.ReadWrite`, and copy the *Application (client) ID*.
 2. **Create the host directories** once (owned by uid/gid 1000, mode 700):
 
    ```bash
@@ -215,6 +215,20 @@ the would-be decisions count. Like the rest of the page it has no login. Results
         - { field: { today: deleted }, label: Deleted }
         - { field: last_scan_seconds_ago, label: Last scan, format: duration }
 ```
+
+## Outlook categories
+
+You can also train the filter from inside Outlook. Apply one of these categories to a message in Junk, Deleted Items or the
+quarantine folder, and the next pass does the same thing as the matching review-page action, then swaps the category for a green
+`✓` marker:
+
+- `Spam` / `Not Spam`: teach Bayes. `Allow Sender` / `Allow Domain`: allowlist. `Restore to Junk`: move it back (and keep it).
+- `Conflict` (two action categories) and `Failure` (the action failed; remove it to retry) are red and never act.
+- `Deleted ✓` is put on every message the job moves to Deleted Items, so they are easy to find there.
+
+This needs the extra permission `MailboxSettings.ReadWrite` (to create the categories), so each mailbox signs in again once after
+upgrading to 0.13.0. See the [runbook](docs/RUNBOOK.md#outlook-categories-0130-and-later) and the
+[design](docs/DESIGN.md#outlook-categories).
 
 ## Roll it out safely
 

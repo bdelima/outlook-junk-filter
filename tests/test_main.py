@@ -147,7 +147,7 @@ def test_sign_in_that_cannot_start_is_reported(tmp_path, caplog):
 
 def test_authority_and_scope_are_the_consumers_ones():
     assert auth_module.AUTHORITY == "https://login.microsoftonline.com/consumers"
-    assert auth_module.SCOPES == ["Mail.ReadWrite"]
+    assert auth_module.SCOPES == ["Mail.ReadWrite", "MailboxSettings.ReadWrite"]
 
 
 @pytest.mark.parametrize("error,renews", [("invalid_grant", True), ("interaction_required", True), ("temporarily_unavailable", False)])

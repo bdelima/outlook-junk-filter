@@ -158,13 +158,17 @@ class Actions:
     # ------------------------------------------------------------------ restore
 
     def restore(self, record: dict, destination: str) -> str:
+        return self.restore_moved(record, destination)[0]
+
+    def restore_moved(self, record: dict, destination: str) -> tuple:
+        """Restore, and also return the moved message's new id (Graph gives a moved message a new one)."""
         if destination not in DESTINATIONS:
             raise ActionError("Choose Junk or Inbox.")
         if not can_restore(record):
             raise ActionError("Only a message in the quarantine folder or Deleted Items can be restored.")
         message_id = record["current_message_id"]
         try:
-            self._graph.move(message_id, DESTINATIONS[destination])
+            new_id = self._graph.move(message_id, DESTINATIONS[destination])
         except GraphError as exc:
             if exc.status == 404:
                 raise ActionError("That message is no longer in Outlook, so it cannot be restored.") from exc
@@ -174,7 +178,7 @@ class Actions:
         # the job must not rescore it and move it straight back
         self._restored.add(record.get("internet_message_id") or "")
         self._record("restore", message_id, destination)
-        return f"Restored to {destination.capitalize()}. The job will keep it."
+        return f"Restored to {destination.capitalize()}. The job will keep it.", new_id or message_id
 
     # ------------------------------------------------------------------ delete log rows
 

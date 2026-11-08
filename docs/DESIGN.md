@@ -1,7 +1,7 @@
 # SpamWatch design
 
 SpamWatch is the product name; the repository, image and environment variables keep the name `outlook-junk-filter` (`OJF_*`).
-This document describes what is built as of **0.12.0**, how the parts fit together, and why they are built that way. For
+This document describes what is built as of **0.13.0**, how the parts fit together, and why they are built that way. For
 deploying and operating it, see the [runbook](RUNBOOK.md). For settings, see the [README](../README.md).
 
 ## Purpose and limits
@@ -277,9 +277,36 @@ raw name. SpamAssassin's stock scores order the phrases (the log stores names, n
 
 The container runs as uid/gid 1000 on a read-only root filesystem; only `/state` and `/config` are written.
 
+## Outlook categories
+
+A person can train and manage the filter from inside Outlook, with no review page: apply a category to a message and the next
+pass runs the matching action. The names are fixed in `categories.py` (not settings), and categories cannot be renamed once
+created. Each mailbox (each instance) creates the categories in its own mailbox.
+
+| Category | What the job does |
+|---|---|
+| `Spam`, `Not Spam` | Teach Bayes (as the review page does) and nothing else. Marking one way retires the opposite marker. |
+| `Allow Sender`, `Allow Domain` | Add a `whitelist_auth` line for the address or `*@domain` (an entry counts only when SPF or DKIM passes). |
+| `Restore to Junk` | In Deleted Items or the quarantine folder: move to Junk and add to the restored list. Already in Junk: only remove the category. |
+| `Spam ✓`, `Not Spam ✓`, `Allow Sender ✓`, `Allow Domain ✓`, `Restore to Junk ✓` | Green done markers, added when the action succeeded (the action category is removed). |
+| `Conflict` | Red. Added, with no action, when a message carries more than one action category. The job removes it once only one is left. |
+| `Failure` | Red. Added when the action failed; the action category stays. The job does not retry until the person removes `Failure`; a later success removes it. |
+| `Deleted ✓` | Gray. Put on every message the job itself moves to Deleted Items (a threshold delete or an expired quarantine message), so they are easy to pick out there. Not applied in `permanent` delete mode, where nothing is left to tag. Removed again by `Restore to Junk`. |
+
+Every pass, in addition to the Junk delta, the job queries Junk, Deleted Items and the quarantine folder for messages carrying an
+action category (`$filter` with OR across names; it does not rely on the delta, which may not report category-only changes).
+Actions reuse the review page's code (`ui/actions.py`) and are written to `actions.jsonl`, so the *Actions taken* chips appear.
+Category actions run in report-only mode too, like the review page's actions; nothing is deleted by a category. The Inbox is never
+read. Actions run on the next pass, up to one interval later. The category change is made on the id the move returned, because
+Graph gives a moved message a new id. The twelve action, marker and problem categories (and `Deleted ✓`) are created at
+startup if missing and retried on the next pass if that fails; an existing category keeps its color.
+
+Colors use Graph presets: action categories use `Preset1` (orange, standing in for peach, which is not in Microsoft's table), markers
+`Preset4` (green), problems `Preset0` (red) and `Deleted ✓` `Preset12` (gray).
+
 ## Sign-in
 
-MSAL device-code flow against the `consumers` authority with the delegated scope `Mail.ReadWrite`. The Application (client) ID
+MSAL device-code flow against the `consumers` authority with the delegated scopes `Mail.ReadWrite` and `MailboxSettings.ReadWrite` (the second only creates the category list, see [Outlook categories](#outlook-categories)). The Application (client) ID
 belongs to an app registration for *personal Microsoft accounts*, set as a public client. A client ID is only an app
 registration; each mailbox signs in separately and its token stays in that instance's `/state`. The job logs
 `SIGN-IN NEEDED: open <url> and enter code <code>`, waits for the code (touching the health file so the container stays
@@ -344,6 +371,7 @@ healthy), and refreshes silently afterwards. A refresh failure that means the to
 | 0.10.0 | Allowlist batches, *Actions taken*, plain-English rules, bubble, resizable columns, one-row toolbar |
 | 0.11.0 | SpamWatch header, icon and mailbox; delete rows; log pruning; stats API |
 | 0.12.0 | Delete all matching rows; batch actions return to the filtered view |
+| 0.13.0 | Outlook category hooks (train and manage from inside Outlook); `Deleted ✓` on messages the job deletes; new scope `MailboxSettings.ReadWrite` (each mailbox signs in again) |
 
 ## Not built
 

@@ -1,4 +1,4 @@
-"""A small Microsoft Graph client: only the calls the spec lists, all under Mail.ReadWrite."""
+"""A small Microsoft Graph client: only the calls the spec lists. Mail.ReadWrite, plus MailboxSettings.ReadWrite for categories."""
 
 from __future__ import annotations
 
@@ -8,10 +8,11 @@ from urllib.parse import quote
 import requests
 
 BASE = "https://graph.microsoft.com/v1.0"
-DELTA_SELECT = "id,receivedDateTime,from,subject,internetMessageId"
+DELTA_SELECT = "id,receivedDateTime,from,subject,internetMessageId,categories"
 # No $top on the delta query: Graph appears to treat it as a cap on the whole round (the first real
 # deployment scored 50 of 570 messages). The documented page-size control is the Prefer header.
 DELTA_URL = f"{BASE}/me/mailFolders/junkemail/messages/delta?$select={DELTA_SELECT}"
+CATEGORY_SELECT = DELTA_SELECT
 DELTA_HEADERS = {"Prefer": "odata.maxpagesize=50"}
 MAX_RETRIES = 6
 MAX_WAIT = 300
@@ -156,3 +157,35 @@ class GraphClient:
 
     def permanent_delete(self, message_id: str) -> None:
         self._request("POST", f"{BASE}/me/messages/{quote(message_id, safe='')}/permanentDelete", expect=(204,))
+
+    # ------------------------------------------------------------------ Outlook categories
+
+    def master_categories(self) -> list:
+        """The mailbox's category list (needs MailboxSettings.ReadWrite)."""
+        url, out = f"{BASE}/me/outlook/masterCategories", []
+        while url:
+            data = self._request("GET", url).json()
+            out.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+        return out
+
+    def create_master_category(self, name: str, color: str) -> dict:
+        body = {"displayName": name, "color": color}
+        return self._request("POST", f"{BASE}/me/outlook/masterCategories", json=body, expect=(200, 201)).json()
+
+    def categorized_messages(self, folder: str, names) -> list:
+        """Messages in a folder (id or well-known name) carrying any of these categories. Uses OR only: AND was reported unreliable."""
+        flt = " or ".join("categories/any(a:a eq '" + name.replace("'", "''") + "')" for name in names)
+        url = (
+            f"{BASE}/me/mailFolders/{quote(folder, safe='')}/messages?$filter={quote(flt, safe='')}"
+            f"&$select={CATEGORY_SELECT}&$top=50"
+        )
+        out = []
+        while url:
+            data = self._request("GET", url).json()
+            out.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+        return out
+
+    def set_categories(self, message_id: str, categories) -> None:
+        self._request("PATCH", f"{BASE}/me/messages/{quote(message_id, safe='')}", json={"categories": list(categories)})
