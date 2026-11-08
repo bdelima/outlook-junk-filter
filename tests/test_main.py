@@ -24,6 +24,9 @@ class FakeAuth:
     def silent(self):
         return SilentResult(token="t") if self.has_token else SilentResult(needs_signin=True)
 
+    def account_name(self):
+        return "me@example.invalid"
+
     def access_token(self):
         return "t"
 

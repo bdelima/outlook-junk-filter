@@ -9,7 +9,7 @@ from __future__ import annotations
 import csv
 import html
 import io
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
 from . import actions as actions_module
 from .logreader import PER_PAGE
@@ -27,25 +27,56 @@ def link(path: str, params: dict, text: str) -> str:
     return f'<a href="{esc(path + ("?" + query if query else ""))}">{esc(text)}</a>'
 
 
-def layout(title: str, body: str, header: str = "") -> str:
+NAV = (("/", "Decisions"), ("/summary", "Summary"), ("/whatif", "What-if"))
+
+
+APP_NAME = "SpamWatch"
+FILTER_KEYS = ("q", "decision", "date_from", "date_to", "score_min", "score_max")
+RETURN_KEYS = FILTER_KEYS + ("sort", "order")
+
+
+def return_params(raw: str) -> dict:
+    """The Decisions view to go back to, from a posted query string. Only known keys survive."""
+    return {k: v for k, v in parse_qsl(raw or "", keep_blank_values=False) if k in RETURN_KEYS and len(v) < 200}
+ICON = (
+    '<svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" '
+    'stroke-linecap="round" aria-hidden="true"><path d="M12 2.5l8 3v5.5c0 5-3.4 8.7-8 10-4.6-1.3-8-5-8-10V5.5z"/>'
+    '<rect x="7.5" y="9" width="9" height="6.5" rx="1"/><path d="M7.5 10l4.5 3.2 4.5-3.2"/></svg>'
+)
+_brand = {"account": ""}
+
+
+def _account() -> str:
+    return esc(_brand["account"])
+
+
+def set_account(address: str) -> None:
+    """The mailbox this instance watches, shown under the name (one instance, one mailbox)."""
+    _brand["account"] = str(address or "")
+
+
+def layout(title: str, body: str, header: str = "", active: str = "") -> str:
+    on = ' class="on"'
+    tabs = "".join(f'<a href="{path}"{on if (active or "") == path else ""}>{label}</a>' for path, label in NAV)
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        f"<title>{esc(title)}</title><link rel=\"stylesheet\" href=\"/static/style.css\"></head><body>"
-        "<nav><strong>outlook-junk-filter</strong> "
-        '<a href="/">Decisions</a> <a href="/summary">Summary</a> <a href="/whatif">What-if</a></nav>'
-        f"{header}<main><h1>{esc(title)}</h1>{body}</main></body></html>"
+        f"<title>{esc(title)} · {APP_NAME}</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/icon.svg\">"
+        "<link rel=\"stylesheet\" href=\"/static/style.css\"></head><body>"
+        f"<nav><span class=\"brand\">{ICON}<span><span class=\"name\">{APP_NAME}</span>"
+        f"<span class=\"mailbox\">{_account()}</span></span></span>{tabs}{header}</nav>"
+        f"<main><h1>{esc(title)}</h1>{body}</main></body></html>"
     )
 
 
 def header_block(info: dict) -> str:
     age = info.get("age_seconds")
     age_text = "no records yet" if age is None else _age(age)
-    skipped = f", {esc(info['skipped'])} malformed line(s) skipped" if info.get("skipped") else ""
+    skipped = f" \u00b7 {esc(info['skipped'])} malformed line(s) skipped" if info.get("skipped") else ""
     return (
-        '<p class="meta">'
-        f"{esc(info['records'])} records loaded; oldest {esc(info['oldest'] or '-')}, newest {esc(info['newest'] or '-')}; "
-        f"last record {esc(age_text)}{skipped}. New records appear on reload.</p>"
+        '<span class="status">'
+        f"{esc(info['records'])} records \u00b7 newest {esc(info['newest'] or '-')} \u00b7 last record {esc(age_text)}{skipped}"
+        "</span>"
     )
 
 
@@ -65,50 +96,181 @@ def _score(value) -> str:
     return f"{value:.1f}" if isinstance(value, (int, float)) else "-"
 
 
-def decisions_page(page, params: dict, info: dict) -> str:
+COLUMNS = (
+    # sort key, heading, default width in px
+    ("time", "Time", 112),
+    ("sender", "Sender", 190),
+    ("subject", "Subject", 300),
+    ("score", "Score", 70),
+    ("scl", "SCL", 60),
+    ("decision", "Decision", 120),
+    (None, "Actions taken", 190),
+)
+
+
+def _time(ts) -> str:
+    text = str(ts or "")
+    return text[5:16].replace("T", " ") if len(text) >= 16 else text
+
+
+def _chips(chips: list) -> str:
+    if not chips:
+        return '<span class="none">none</span>'
+    return "".join(f'<span class="chip {esc(kind)}" title="{esc(ts)}">{esc(label)}</span>' for label, kind, ts in chips)
+
+
+def _bubble(record: dict, explanation) -> str:
+    """The hover text for a score: why it was decided, what fired, in plain words, and the AI's view."""
+    parts = [f"<p><strong>{esc(str(record.get('decision') or '').capitalize())}:</strong> {esc(record.get('reason'))}</p>"]
+    against = "; ".join(esc(p) for p in explanation.against)
+    favor = "; ".join(esc(p) for p in explanation.favor)
+    more = f"; +{esc(explanation.more)} minor finding(s)" if explanation.more else ""
+    parts.append(f'<p><span class="k">Against it</span>{against + more if against else "nothing notable"}</p>')
+    parts.append(f'<p><span class="k">In its favor</span>{favor or "nothing notable"}</p>')
+    ai = record.get("ai_score")
+    if isinstance(ai, (int, float)) and not isinstance(ai, bool):
+        reason = str(record.get("ai_reason") or "")
+        text = f"{ai:g} of 10" + (f": \u201c{reason[:200]}\u201d" if reason else "")
+        parts.append(f'<p><span class="k">AI rating</span>{esc(text)}</p>')
+    else:
+        parts.append('<p><span class="k">AI rating</span><span class="none">not rated</span></p>')
+    return '<div class="tip" role="tooltip">' + "".join(parts) + "</div>"
+
+
+def _sort_head(key, heading, width, params):
+    base = {k: v for k, v in params.items() if k not in ("page", "sort", "order")}
+    if key is None:
+        return f'<th data-w="{width}"><span class="h">{esc(heading)}</span><i class="grip"></i></th>'
+    current = params.get("sort", "time") == key
+    descending = params.get("order", "desc") == "desc"
+    mark = (" \u25be" if descending else " \u25b4") if current else ""
+    nxt = "asc" if (current and descending) else "desc"
+    if key in ("sender", "subject", "decision") and not current:
+        nxt = "asc"
+    return (
+        f'<th data-w="{width}"><a class="h" href="{esc("/?" + urlencode({**{k: v for k, v in base.items() if v}, "sort": key, "order": nxt}))}">'
+        f"{esc(heading)}{mark}</a><i class=\"grip\"></i></th>"
+    )
+
+
+def _pager(page, params: dict, current: int, pages: int, base: dict) -> str:
+    first = (current - 1) * PER_PAGE + 1 if page.total else 0
+    last = min(page.total, current * PER_PAGE)
+    out = f"{esc(first)}\u2013{esc(last)} of {esc(page.total)}"
+    if current > 1:
+        out += " \u00b7 " + link("/", {**base, "page": current - 1}, "Previous")
+    if current < pages:
+        out += " \u00b7 " + link("/", {**base, "page": current + 1}, "Next")
+    return out + " \u00b7 " + link("/export.csv", {k: v for k, v in base.items() if k not in ("sort", "order")}, "Export CSV")
+
+
+def decisions_page(page, params: dict, info: dict, token: str = "", can_act: bool = False, history=None, rules=None) -> str:
     form = (
         '<form method="get" action="/" class="filters">'
-        f'<label>Decision <select name="decision">{_options(("",) + DECISIONS, params.get("decision", ""))}</select></label> '
-        f'<label>From <input type="date" name="date_from" value="{esc(params.get("date_from", ""))}"></label> '
-        f'<label>To <input type="date" name="date_to" value="{esc(params.get("date_to", ""))}"></label> '
-        f'<label>Score min <input name="score_min" size="5" value="{esc(params.get("score_min", ""))}"></label> '
-        f'<label>max <input name="score_max" size="5" value="{esc(params.get("score_max", ""))}"></label> '
-        f'<label>Search <input name="q" value="{esc(params.get("q", ""))}"></label> '
-        f'<label>Sort <select name="sort">{_options(("time", "score"), params.get("sort", "time"))}</select></label> '
-        f'<label><select name="order">{_options(("desc", "asc"), params.get("order", "desc"))}</select></label> '
-        '<button type="submit">Apply</button></form>'
+        f'<input type="search" name="q" class="grow" placeholder="Search sender or subject" value="{esc(params.get("q", ""))}">'
+        f'<label>Decision <select name="decision">{_options(("",) + DECISIONS, params.get("decision", ""))}</select></label>'
+        f'<label>Score <input name="score_min" size="4" placeholder="min" value="{esc(params.get("score_min", ""))}">'
+        f' \u2013 <input name="score_max" size="4" placeholder="max" value="{esc(params.get("score_max", ""))}"></label>'
+        f'<label>Dates <input type="date" name="date_from" value="{esc(params.get("date_from", ""))}">'
+        f' \u2013 <input type="date" name="date_to" value="{esc(params.get("date_to", ""))}"></label>'
+        f'<input type="hidden" name="sort" value="{esc(params.get("sort", "time"))}">'
+        f'<input type="hidden" name="order" value="{esc(params.get("order", "desc"))}">'
+        '<button type="submit" class="primary">Apply</button> <a class="btn" href="/">Reset</a></form>'
     )
     rows = []
     for record in page.rows:
         detail = {"id": record.get("message_id", ""), "ts": record.get("ts", "")}
+        chips = history.chips(record) if history is not None else []
+        explanation = rules.explain(record.get("rules")) if rules is not None else None
+        score_text = _score(record.get("score"))
+        score_cell = (
+            f'<td class="num sc"><span class="score" tabindex="0">{esc(score_text)}</span>{_bubble(record, explanation)}</td>'
+            if explanation is not None
+            else f'<td class="num">{esc(score_text)}</td>'
+        )
         rows.append(
             "<tr>"
-            f"<td>{link('/message', detail, record.get('ts', ''))}</td>"
-            f"<td>{esc(record.get('from_addr'))}</td>"
-            f"<td>{esc(record.get('subject'))}</td>"
-            f"<td class=\"num\">{esc(_score(record.get('score')))}</td>"
-            f"<td class=\"num\">{esc(record.get('ms_scl') if record.get('ms_scl') is not None else '-')}</td>"
+            + (_checkbox(record) if can_act else "")
+            + f'<td title="{esc(record.get("ts"))}">{link("/message", detail, _time(record.get("ts")))}</td>'
+            f'<td title="{esc(record.get("from_addr"))}">{esc(record.get("from_addr"))}</td>'
+            f'<td title="{esc(record.get("subject"))}">{esc(record.get("subject"))}</td>'
+            + score_cell
+            + f'<td class="num">{esc(record.get("ms_scl") if record.get("ms_scl") is not None else "-")}</td>'
             f"<td>{esc(record.get('decision'))}</td>"
-            f"<td>{esc(record.get('reason'))}</td></tr>"
+            f'<td class="chips">{_chips(chips)}</td></tr>'
         )
+    span = len(COLUMNS) + (1 if can_act else 0)
+    cols = ("<col data-w=\"30\">" if can_act else "") + "".join(f'<col data-w="{w}">' for _, _, w in COLUMNS)
+    heads = (
+        '<th class="chk"><input type="checkbox" id="select-all" title="Select all on this page" aria-label="Select all on this page"></th>'
+        if can_act
+        else ""
+    ) + "".join(_sort_head(key, heading, width, params) for key, heading, width in COLUMNS)
     table = (
-        "<table><thead><tr><th>Time</th><th>Sender</th><th>Subject</th><th>Score</th><th>MS SCL</th>"
-        "<th>Decision</th><th>Reason</th></tr></thead><tbody>"
-        + ("".join(rows) or '<tr><td colspan="7">No decisions to show.</td></tr>')
-        + "</tbody></table>"
+        f'<div class="tablewrap"><table id="decisions"><colgroup>{cols}</colgroup><thead><tr>{heads}</tr></thead><tbody>'
+        + ("".join(rows) or f'<tr><td colspan="{span}">No decisions to show.</td></tr>')
+        + "</tbody></table></div>"
     )
     current = int(params.get("page", "1") or 1)
-    pages = max(1, -(-page.total // PER_PAGE))
+    total_pages = max(1, -(-page.total // PER_PAGE))
     base = {k: v for k, v in params.items() if k != "page"}
-    pager = "<p class=\"pager\">"
-    if current > 1:
-        pager += link("/", {**base, "page": current - 1}, "Previous") + " "
-    pager += f"Page {esc(current)} of {esc(pages)} ({esc(page.total)} matching) "
-    if current < pages:
-        pager += link("/", {**base, "page": current + 1}, "Next") + " "
-    pager += link("/export.csv", base, "Export CSV") + "</p>"
+    pager = _pager(page, params, current, total_pages, base)
     skipped = f'<p class="meta">{esc(page.skipped)} malformed line(s) skipped.</p>' if page.skipped else ""
-    return layout("Decisions", form + pager + table + pager + skipped, header_block(info))
+    if can_act:
+        menu = "".join(
+            f'<button type="submit" name="choose" value="{esc(action)}" class="item">{esc(text)} <span class="n" data-n="{esc(group)}"></span></button>'
+            for action, text, group in MENU
+        )
+        ret = urlencode({k: v for k, v in params.items() if k in RETURN_KEYS and v})
+        delete_all = (
+            f' \u00b7 <button type="submit" form="delete-matching" class="btn danger-text">Delete all {esc(page.total)} matching\u2026</button>'
+            if page.total
+            else ""
+        )
+        bar = (
+            '<div class="selbar"><span class="selinfo"><strong id="selcount">0 selected</strong>'
+            f'<details class="actions"><summary class="btn">Actions \u25be</summary><div class="menu">{menu}</div></details>'
+            '<button type="button" class="btn" id="clear-selection">Clear</button></span>'
+            f'<span class="pager">{pager}{delete_all}</span></div>'
+        )
+        filters = "".join(
+            f'<input type="hidden" name="{k}" value="{esc(params.get(k, ""))}">' for k in FILTER_KEYS if params.get(k)
+        )
+        table = (
+            '<form method="post" action="/batch">'
+            f'<input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="return" value="{esc(ret)}">'
+            + bar + table + "</form>"
+            f'<form id="delete-matching" method="post" action="/delete-matching"><input type="hidden" name="token" value="{esc(token)}">{filters}</form>'
+            f'<p class="pager below">{pager}</p><script src="/static/ui.js"></script>'
+        )
+    else:
+        table = f'<div class="selbar"><span class="pager">{pager}</span></div>' + table + f'<p class="pager below">{pager}</p><script src="/static/ui.js"></script>'
+    return layout("Decisions", form + table + skipped, header_block(info), "/")
+
+
+MENU = (
+    ("teach-spam", "Teach: spam", "teach"),
+    ("teach-ham", "Teach: not spam", "teach"),
+    ("restore-junk", "Restore to Junk", "restore"),
+    ("restore-inbox", "Restore to Inbox", "restore"),
+    ("allow-address", "Allowlist sender address", "allow"),
+    ("allow-domain", "Allowlist sender domain", "allow"),
+    ("delete-row", "Delete from log\u2026", "all"),
+)
+
+
+def _checkbox(record: dict) -> str:
+    """A tick box for a row that a batch action could apply to; the value names the exact record."""
+    flags = {
+        "t": actions_module.eligible("teach-spam", record),
+        "r": actions_module.eligible("restore-junk", record),
+        "a": actions_module.eligible("allow-address", record),
+    }
+    if not any(flags.values()):
+        return '<td class="chk"></td>'
+    data = "".join(f' data-{k}="1"' for k, v in flags.items() if v)
+    value = f"{record.get('ts', '')}|{record.get('message_id', '')}"
+    return f'<td class="chk"><input type="checkbox" name="sel" value="{esc(value)}"{data} aria-label="Select this row"></td>'
 
 
 def _options(values, selected) -> str:
@@ -117,47 +279,73 @@ def _options(values, selected) -> str:
     )
 
 
-def message_page(record: dict, info: dict, quarantine_folder: str = "") -> str:
+def message_page(record: dict, info: dict, history=None, rules=None) -> str:
     fields = [
         "ts", "message_id", "internet_message_id", "received", "from_addr", "subject", "score",
         "keep_rule_hit", "relays_untrusted", "first_untrusted_ip", "auth_results_present", "mode", "decision",
         "reason", "action_error", "ms_scl", "ai_score", "ai_reason", "current_message_id", "folder",
     ]
     items = "".join(f"<dt>{esc(name)}</dt><dd>{esc(record.get(name))}</dd>" for name in fields)
-    rules = record.get("rules") or []
-    rule_list = "<ul>" + "".join(f"<li>{esc(rule)}</li>" for rule in rules) + "</ul>" if rules else "<p>none</p>"
-    body = f"<dl>{items}</dl><h2>Rules that fired</h2>{rule_list}" + _actions_block(record)
-    body += "<p>The log holds no message bodies. To read the message, open it in Outlook (in Junk or the quarantine folder).</p>"
-    return layout("Message", body, header_block(info))
+    names = record.get("rules") or []
+    if names:
+        lines = []
+        for name in names:
+            text = rules.detail(name) if rules is not None else ""
+            shown = esc(text[:1].upper() + text[1:]) if text else '<span class="none">no description</span>'
+            lines.append(f'<li>{shown} <code class="tok">{esc(name)}</code></li>')
+        rule_list = "<ul>" + "".join(lines) + "</ul>"
+    else:
+        rule_list = "<p>none</p>"
+    side = _actions_block(record, history)
+    body = (
+        f'<div class="detail"><div><dl>{items}</dl><h2>Rules that fired</h2>{rule_list}</div><aside>{side}</aside></div>'
+        "<p>The log holds no message bodies. To read the message, open it in Outlook (in Junk or the quarantine folder).</p>"
+    )
+    return layout("Message", body, header_block(info), "/")
 
 
-def _actions_block(record: dict) -> str:
+def _row(done: bool, label: str, when: str, links: str) -> str:
+    mark = '<span class="ok">\u2713</span>' if done else '<span class="none">\u25cb</span>'
+    stamp = f'<span class="none">{esc(when)}</span> ' if when else ""
+    return f'<div class="arow"><span>{mark} {label}</span><span>{stamp}{links}</span></div>'
+
+
+def _actions_block(record: dict, history=None) -> str:
     base = {"id": record.get("message_id", ""), "ts": record.get("ts", "")}
+
+    def act(action, text):
+        return link("/confirm", {**base, "action": action}, text)
+
+    message_id = record.get("current_message_id") or ""
     out = ["<h2>Actions</h2>"]
     if not actions_module.can_teach(record):
-        out.append("<p>This message is gone from Outlook (permanently deleted), so this row is view-only for teaching and restoring.</p>")
+        out.append("<p>This message is gone from Outlook (permanently deleted), so it cannot be taught or restored.</p>")
     else:
+        taught = history.teach.get(message_id) if history is not None else None
+        label = ("spam" if taught and taught[0] == "spam" else "not spam") if taught else ""
         out.append(
-            "<p>Teach Bayes: "
-            + link("/confirm", {**base, "action": "teach-spam"}, "this is spam")
-            + " &middot; "
-            + link("/confirm", {**base, "action": "teach-ham"}, "this is not spam")
-            + "</p>"
+            _row(bool(taught), f"Taught Bayes: {esc(label)}" if taught else "Teach Bayes", taught[1] if taught else "",
+                 act("teach-spam", "spam") + " \u00b7 " + act("teach-ham", "not spam"))
         )
     if actions_module.can_restore(record):
+        restored = history.restore.get(message_id) if history is not None else None
         out.append(
-            "<p>Restore: "
-            + link("/confirm", {**base, "action": "restore-junk"}, "back to Junk")
-            + " &middot; "
-            + link("/confirm", {**base, "action": "restore-inbox"}, "to the Inbox")
-            + "</p>"
+            _row(bool(restored), f"Restored to {esc(restored[0].capitalize())}" if restored else "Restore", restored[1] if restored else "",
+                 act("restore-junk", "to Junk") + " \u00b7 " + act("restore-inbox", "to Inbox"))
         )
+    status = history.allow_status(record) if history is not None else {"address": None, "domain": None}
+    address = str(record.get("from_addr") or "").strip().lower()
+    if actions_module.eligible("allow-address", record):
+        domain = address.split("@", 1)[1]
+        out.append(_row(bool(status["address"]), "Sender address allowlisted" if status["address"] else "Allowlist sender address",
+                        status["address"] or "", act("allow-address", "allowlist")))
+        out.append(_row(bool(status["domain"]), f"Domain allowlisted ({esc(domain)})" if status["domain"] else "Allowlist sender domain",
+                        status["domain"] or "", act("allow-domain", "allowlist")))
+        out.append('<p class="meta">Allowlist entries count only when SPF or DKIM passes. A done action stays clickable to repeat it.</p>')
+    else:
+        out.append("<p>This sender address cannot be allowlisted (it is not a plain address).</p>")
     out.append(
-        "<p>Allowlist (counts only when SPF or DKIM passes): "
-        + link("/confirm", {**base, "action": "allow-address"}, "this sender address")
-        + " &middot; "
-        + link("/confirm", {**base, "action": "allow-domain"}, "this sender's domain")
-        + "</p>"
+        '<p class="danger-zone">' + act("delete-row", "Delete this log row\u2026") + "</p>"
     )
     return "".join(out)
 
@@ -169,6 +357,7 @@ ACTION_TEXT = {
     "restore-inbox": "Move this message to the Inbox (the job will keep it)",
     "allow-address": "Allowlist this sender address",
     "allow-domain": "Allowlist this sender's whole domain",
+    "delete-row": "Remove this row from the log (the email in Outlook is not touched; this can't be undone)",
 }
 
 
@@ -264,3 +453,129 @@ def csv_rows(records):
             ]
         )
         yield buffer.getvalue()
+
+
+BATCH_TEXT = {
+    "teach-spam": "Teach Bayes: spam",
+    "teach-ham": "Teach Bayes: not spam",
+    "restore-junk": "Restore to Junk",
+    "restore-inbox": "Restore to Inbox",
+    "allow-address": "Allowlist sender address",
+    "allow-domain": "Allowlist sender domain",
+    "delete-row": "Delete from log",
+}
+
+
+def batch_page(records: list, missing: int, keys: list, token: str, info: dict, chosen: str = "", ret: dict | None = None) -> str:
+    """Show the selected rows and the actions that apply to at least one of them."""
+    ret = ret or {}
+    hidden = f'<input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="return" value="{esc(urlencode(ret))}">' + "".join(
+        f'<input type="hidden" name="sel" value="{esc(k)}">' for k in keys
+    )
+    buttons = []
+    for action, text in BATCH_TEXT.items():
+        count = sum(1 for r in records if actions_module.eligible(action, r))
+        if count:
+            css = (' class="danger"' if action == "delete-row" else ' class="primary"') if action == chosen else (
+                ' class="danger-text"' if action == "delete-row" else ""
+            )
+            buttons.append(
+                f'<button type="submit" name="action" value="{esc(action)}"{css}>{esc(text)} ({count} of {len(records)})</button>'
+            )
+    rows = "".join(
+        "<tr>"
+        f"<td>{esc(r.get('ts'))}</td><td>{esc(r.get('from_addr'))}</td><td>{esc(r.get('subject'))}</td>"
+        f"<td>{esc(r.get('decision'))}</td><td>{esc(r.get('folder') or '-')}</td></tr>"
+        for r in records
+    )
+    note = f'<p class="error">{esc(missing)} selected row(s) are no longer in the log and are left out.</p>' if missing else ""
+    lead = ""
+    if chosen == "delete-row":
+        lead = (
+            f"<p><strong>Remove {esc(len(records))} row(s) from the log?</strong> Only the history rows on this page. "
+            "The emails in Outlook and what the job has already decided are not touched. This can't be undone.</p>"
+        )
+    elif chosen in BATCH_TEXT:
+        count = sum(1 for r in records if actions_module.eligible(chosen, r))
+        lead = (
+            f"<p><strong>{esc(BATCH_TEXT[chosen])}</strong> applies to {esc(count)} of {esc(len(records))} selected message(s). "
+            "Press its button to run it; the others are listed in case you picked the wrong one.</p>"
+            if count
+            else f"<p><strong>{esc(BATCH_TEXT[chosen])}</strong> does not apply to any of the selected messages.</p>"
+        )
+    if buttons:
+        actions = (
+            f'<form method="post" action="/batch">{hidden}'
+            f'<p class="buttons">{" ".join(buttons)}</p></form>'
+            '<p class="meta">Each button applies only to the rows it fits; the count shows how many. '
+            "Teaching runs one message at a time, so a large selection takes a while.</p>"
+        )
+    else:
+        actions = "<p>None of the selected messages can be taught, restored or allowlisted.</p>"
+    body = (
+        f"<p>{esc(len(records))} message(s) selected.</p>"
+        + lead
+        + note
+        + actions
+        + '<div class="tablewrap"><table><thead><tr><th>Time</th><th>Sender</th><th>Subject</th><th>Decision</th><th>Folder</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table></div><p>{link('/', ret, 'Back to the decisions')}</p>"
+    )
+    return layout("Batch actions", body, header_block(info), "/")
+
+
+def batch_result_page(action: str, results: list, missing: int, info: dict, ret: dict | None = None) -> str:
+    done = sum(1 for _, ok, _ in results if ok)
+    problems = [(r, m) for r, ok, m in results if not ok]
+    rows = "".join(
+        f"<tr><td>{esc(r.get('from_addr'))}</td><td>{esc(r.get('subject'))}</td><td>{esc(m)}</td></tr>" for r, m in problems
+    )
+    body = (
+        f"<p>{esc(BATCH_TEXT.get(action, action))}: {esc(done)} done, {esc(len(problems))} not done"
+        + (f", {esc(missing)} no longer in the log" if missing else "")
+        + ".</p>"
+        + (
+            "<h2>Not done</h2><table><thead><tr><th>Sender</th><th>Subject</th><th>Why</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+            if problems
+            else ""
+        )
+        + f"<p>{link('/', ret or {}, 'Back to the decisions')}</p>"
+    )
+    return layout("Batch result", body, header_block(info))
+
+
+FILTER_LABELS = {
+    "q": "search",
+    "decision": "decision",
+    "date_from": "from",
+    "date_to": "to",
+    "score_min": "score at least",
+    "score_max": "score at most",
+}
+
+
+def delete_matching_page(count: int, params: dict, token: str, info: dict, note: str = "") -> str:
+    """Confirm deleting every row the current filter matches; the count is recomputed when the button is pressed."""
+    active = {k: params[k] for k in FILTER_KEYS if params.get(k)}
+    shown = (
+        "; ".join(f"{FILTER_LABELS[k]}: {v}" for k, v in active.items()) if active else "no filter, so every row in the log"
+    )
+    back = link("/", active, "Cancel")
+    if count == 0:
+        body = f"<p>No rows match ({esc(shown)}).</p><p>{link('/', active, 'Back to the decisions')}</p>"
+        return layout("Delete matching rows", body, header_block(info), "/")
+    hidden = (
+        f'<input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="confirm" value="1">'
+        f'<input type="hidden" name="expect" value="{esc(count)}">'
+        + "".join(f'<input type="hidden" name="{k}" value="{esc(v)}">' for k, v in active.items())
+    )
+    body = (
+        (f'<p class="error">{esc(note)}</p>' if note else "")
+        + f"<p><strong>Remove {esc(count)} row(s) from the log?</strong></p>"
+        f"<p>Every row that matches: {esc(shown)}.</p>"
+        "<p>Only the history rows on this page. The emails in Outlook and what the job has already decided are not touched. "
+        "This can't be undone.</p>"
+        f'<form method="post" action="/delete-matching">{hidden}'
+        f'<button type="submit" class="danger">Delete {esc(count)} rows</button> {back}</form>'
+    )
+    return layout("Delete matching rows", body, header_block(info), "/")

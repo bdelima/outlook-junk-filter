@@ -15,10 +15,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..graph import GraphError, NetworkError
+from ..logs import add_tombstones
 
 ALLOWLIST_FILE = "ojf-allowlist.cf"
 ACTIONS_LOG = "actions.jsonl"
 LEARN_TIMEOUT = 120
+AUDIT_LIMIT = 200  # above this many deleted rows, record one summary line instead of one per row
 
 _ADDRESS = re.compile(r"^[a-z0-9._%+'-]{1,64}@(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}$")
 _DOMAIN = re.compile(r"^(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}$")
@@ -38,6 +40,22 @@ def can_teach(record: dict) -> bool:
 def can_restore(record: dict) -> bool:
     """Only from the quarantine folder or Deleted Items; not from Junk, the Inbox or a permanent delete."""
     return can_teach(record) and record.get("folder") not in RESTORABLE_FROM_EXCLUDED
+
+
+BATCH_ACTIONS = ("teach-spam", "teach-ham", "restore-junk", "restore-inbox", "allow-address", "allow-domain", "delete-row")
+
+
+def eligible(action: str, record: dict) -> bool:
+    """Whether a batch action applies to this record (teaching needs the message in Outlook; restoring needs Deleted Items or quarantine)."""
+    if action in ("teach-spam", "teach-ham"):
+        return can_teach(record)
+    if action in ("restore-junk", "restore-inbox"):
+        return can_restore(record)
+    if action == "delete-row":
+        return True
+    if action in ("allow-address", "allow-domain"):
+        return bool(_ADDRESS.match(str(record.get("from_addr") or "").strip().lower()))
+    return False
 
 
 class Actions:
@@ -104,7 +122,7 @@ class Actions:
 
     # ------------------------------------------------------------------ allowlist
 
-    def allowlist(self, kind: str, from_addr: str) -> str:
+    def allowlist(self, kind: str, from_addr: str, message_id: str = "") -> str:
         """Add a sender address or its domain as a whitelist_auth line (SPF or DKIM must pass for it to count)."""
         address = (from_addr or "").strip().lower()
         if not _ADDRESS.match(address):
@@ -134,7 +152,7 @@ class Actions:
                     os.replace(tmp, path)
                 except OSError as exc:
                     raise ActionError("Could not write the allowlist file (is /config writable?).") from exc
-        self._record("allowlist", "", entry)
+        self._record("allowlist", message_id, entry)
         return f"Allowlisted {entry}. It takes effect on the next scoring pass."
 
     # ------------------------------------------------------------------ restore
@@ -157,3 +175,76 @@ class Actions:
         self._restored.add(record.get("internet_message_id") or "")
         self._record("restore", message_id, destination)
         return f"Restored to {destination.capitalize()}. The job will keep it."
+
+    # ------------------------------------------------------------------ delete log rows
+
+    def delete_rows(self, records: list) -> list:
+        """Hide rows from the log now; the daily prune removes them for good. Touches nothing in Outlook."""
+        pairs, seen, results = [], set(), []
+        for record in records:
+            pair = (record.get("message_id", ""), record.get("ts", ""))
+            if pair in seen:
+                results.append((record, False, "Skipped: the same row was selected more than once."))
+                continue
+            seen.add(pair)
+            pairs.append(pair)
+            results.append((record, True, "Removed from the log."))
+        self.delete_pairs(pairs)
+        return results
+
+    def delete_pairs(self, pairs: list) -> int:
+        """Hide these (message id, time) rows. Returns how many."""
+        try:
+            add_tombstones(self._state / "logs", pairs)
+        except OSError as exc:
+            raise ActionError("Could not write to the log folder (is /state writable?).") from exc
+        if len(pairs) <= AUDIT_LIMIT:
+            for message_id, ts in pairs:
+                self._record("delete-row", message_id, ts)
+        else:  # a bulk delete is one line, not thousands
+            self._record("delete-rows", "", f"{len(pairs)} rows")
+        return len(pairs)
+
+    def delete_row(self, record: dict) -> str:
+        self.delete_rows([record])
+        return "Removed this row from the log."
+
+    # ------------------------------------------------------------------ batch
+
+    def batch(self, action: str, records: list) -> list:
+        """Run one action on many records. Returns (record, ok, message) per record; one failure never stops the rest."""
+        if action not in BATCH_ACTIONS:
+            raise ActionError("Unknown action.")
+        if action == "delete-row":
+            return self.delete_rows(records)
+        results, seen = [], set()
+        for record in records:
+            target = record.get("current_message_id") or ""
+            if not eligible(action, record):
+                results.append((record, False, "Skipped: this action does not apply to the message's current state."))
+                continue
+            sender = str(record.get("from_addr") or "").strip().lower()
+            if action == "allow-domain":
+                sender = sender.split("@", 1)[1]
+            key = sender if action.startswith("allow-") else target
+            if key in seen:
+                note = "the same sender or domain" if action.startswith("allow-") else "the same message"
+                results.append((record, False, f"Skipped: {note} was selected more than once."))
+                continue
+            seen.add(key)
+            try:
+                if action.startswith("allow-"):
+                    message = self.allowlist(
+                        "domain" if action == "allow-domain" else "address", record.get("from_addr", ""), target or record.get("message_id", "")
+                    )
+                elif action == "teach-spam":
+                    message = self.teach(record, spam=True)
+                elif action == "teach-ham":
+                    message = self.teach(record, spam=False)
+                else:
+                    message = self.restore(record, "junk" if action == "restore-junk" else "inbox")
+            except ActionError as exc:
+                results.append((record, False, str(exc)))
+                continue
+            results.append((record, True, message))
+        return results

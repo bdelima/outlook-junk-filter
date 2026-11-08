@@ -7,17 +7,24 @@ token and, when the browser sends an Origin, must come from the page's own host.
 from __future__ import annotations
 
 import hmac
+import json
 import secrets
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import logreader, pages
-from .actions import ActionError
+from ..status import read_status
+from . import history, logreader, pages, stats
+from .actions import BATCH_ACTIONS, ActionError
+from .rules import default_rules
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 4096
+STATS_TTL = 30
+MAX_BATCH_BODY = 256 * 1024
+MAX_BATCH = logreader.PER_PAGE * 2  # a page is 100 rows; allow some slack
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
     "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
@@ -48,6 +55,11 @@ class Context:
         self.actions = actions  # None when the page runs without the job (actions are unavailable)
         self.csrf = csrf  # check the form token and the Origin on actions (OJF_UI_CSRF)
         self.token = secrets.token_urlsafe(32)
+        self.stats_cache = (0.0, None)  # (when, data): Homepage polls, so recount at most every STATS_TTL seconds
+
+    @property
+    def state_dir(self) -> Path:
+        return self.log_dir.parent
 
 
 def make_handler(ctx: Context):
@@ -85,7 +97,11 @@ def make_handler(ctx: Context):
 
         # ------------------------------------------------------------ GET
 
+        def _brand(self):
+            pages.set_account(read_status(ctx.state_dir).get("account", ""))
+
         def do_GET(self):  # noqa: N802
+            self._brand()
             path = urlsplit(self.path).path
             params = self._params()
             try:
@@ -103,6 +119,12 @@ def make_handler(ctx: Context):
                     self._confirm(params)
                 elif path == "/static/style.css":
                     self._send(200, (STATIC / "style.css").read_bytes(), "text/css; charset=utf-8")
+                elif path == "/api/stats":
+                    self._stats()
+                elif path == "/static/icon.svg":
+                    self._send(200, (STATIC / "icon.svg").read_bytes(), "image/svg+xml")
+                elif path == "/static/ui.js":
+                    self._send(200, (STATIC / "ui.js").read_bytes(), "text/javascript; charset=utf-8")
                 else:
                     self._html(pages.layout("Not found", "<p>No such page.</p>"), 404)
             except BrokenPipeError:
@@ -113,11 +135,16 @@ def make_handler(ctx: Context):
                 page_no = max(1, int(params.get("page", "1") or 1))
             except ValueError:
                 page_no = 1
-            sort = params.get("sort", "time") if params.get("sort") in ("time", "score") else "time"
+            sort = params.get("sort", "time") if params.get("sort") in logreader.SORTS else "time"
             order = params.get("order", "desc") if params.get("order") in ("asc", "desc") else "desc"
             page = logreader.query(ctx.log_dir, filters_from(params), sort, order, page_no)
             view = {**params, "page": str(page_no), "sort": sort, "order": order}
-            self._html(pages.decisions_page(page, view, logreader.header(ctx.log_dir)))
+            self._html(
+                pages.decisions_page(
+                    page, view, logreader.header(ctx.log_dir), ctx.token, ctx.actions is not None,
+                    history.load(ctx.log_dir), default_rules(),
+                )
+            )
 
         def _record(self, params):
             return logreader.find(ctx.log_dir, params.get("id", ""), params.get("ts", ""))
@@ -127,7 +154,7 @@ def make_handler(ctx: Context):
             if record is None:
                 self._html(pages.layout("Not found", "<p>That record is not in the log (it may have rotated out).</p>"), 404)
                 return
-            self._html(pages.message_page(record, logreader.header(ctx.log_dir)))
+            self._html(pages.message_page(record, logreader.header(ctx.log_dir), history.load(ctx.log_dir), default_rules()))
 
         def _whatif(self, params):
             q, d = _float(params.get("quarantine", "")), _float(params.get("delete", ""))
@@ -154,6 +181,14 @@ def make_handler(ctx: Context):
                 self.wfile.write(chunk.encode("utf-8"))
             self.close_connection = True
 
+        def _stats(self):
+            now = time.monotonic()
+            when, data = ctx.stats_cache
+            if data is None or now - when > STATS_TTL:
+                data = stats.compute(ctx.log_dir)
+                ctx.stats_cache = (now, data)
+            self._send(200, json.dumps(data).encode("utf-8"), "application/json; charset=utf-8")
+
         def _confirm(self, params):
             action = params.get("action", "")
             record = self._record(params)
@@ -165,29 +200,100 @@ def make_handler(ctx: Context):
         # ------------------------------------------------------------ POST
 
         def do_POST(self):  # noqa: N802
-            if urlsplit(self.path).path != "/act":
+            self._brand()
+            path = urlsplit(self.path).path
+            if path not in ("/act", "/batch", "/delete-matching"):
                 self._html(pages.layout("Not found", "<p>No such page.</p>"), 404)
-                return
-            origin = self.headers.get("Origin")
-            if ctx.csrf and origin and urlsplit(origin).netloc != self.headers.get("Host", ""):
-                self._html(pages.layout("Refused", "<p>Cross-site request refused.</p>"), 403)
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = -1
-            if not 0 <= length <= MAX_BODY:
+            if not 0 <= length <= (MAX_BATCH_BODY if path == "/batch" else MAX_BODY):
                 self._html(pages.layout("Refused", "<p>Bad request.</p>"), 400)
                 return
-            form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode("utf-8", "replace")).items()}
+            # read the (size-capped) body before any refusal: answering and closing with unread data can reset the
+            # client's connection, so it would see a reset instead of the refusal
+            fields = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+            form = {k: v[0] for k, v in fields.items()}
+            origin = self.headers.get("Origin")
+            if ctx.csrf and origin and urlsplit(origin).netloc != self.headers.get("Host", ""):
+                self._html(pages.layout("Refused", "<p>Cross-site request refused.</p>"), 403)
+                return
             if ctx.csrf and not hmac.compare_digest(form.get("token", ""), ctx.token):
                 self._html(pages.layout("Refused", "<p>This form has expired. Go back and open the action again.</p>"), 403)
                 return
-            self._act(form)
+            if path == "/batch":
+                self._batch(form, fields.get("sel", []))
+            elif path == "/delete-matching":
+                self._delete_matching(form)
+            else:
+                self._act(form)
+
+        def _delete_matching(self, form):
+            info = logreader.header(ctx.log_dir)
+            filters = {k: form[k] for k in pages.FILTER_KEYS if form.get(k)}
+            back = pages.link("/", filters, "Back to the decisions")
+            if ctx.actions is None:
+                self._html(pages.result_page("Actions are only available while the job is running.", False, back, info), 503)
+                return
+            pairs = [(r.get("message_id", ""), r.get("ts", "")) for r in logreader.all_matching(ctx.log_dir, filters_from(filters))]
+            if form.get("confirm") != "1":
+                self._html(pages.delete_matching_page(len(pairs), filters, ctx.token, info))
+                return
+            if str(len(pairs)) != form.get("expect", ""):  # rows arrived or went since the count was shown: ask again
+                note = f"The number of matching rows changed from {form.get('expect', '?')} to {len(pairs)}. Check it and confirm again."
+                self._html(pages.delete_matching_page(len(pairs), filters, ctx.token, info, note))
+                return
+            try:
+                removed = ctx.actions.delete_pairs(pairs)
+            except ActionError as exc:
+                self._html(pages.result_page(str(exc), False, back, info), 400)
+                return
+            ctx.stats_cache = (0.0, None)
+            self._html(pages.result_page(f"Removed {removed} row(s) from the log.", True, back, info))
+
+        def _batch(self, form, selected):
+            info = logreader.header(ctx.log_dir)
+            ret = pages.return_params(form.get("return", ""))
+            back = pages.link("/", ret, "Back to the decisions")
+            if ctx.actions is None:
+                self._html(pages.result_page("Actions are only available while the job is running.", False, back, info), 503)
+                return
+            keys = []
+            for value in dict.fromkeys(selected):  # drop repeats, keep the order
+                ts, sep, message_id = value.partition("|")
+                if sep and ts and message_id:
+                    keys.append((message_id, ts))
+            if not keys:
+                self._html(pages.result_page("No rows were selected.", False, back, info), 400)
+                return
+            if len(keys) > MAX_BATCH:
+                self._html(pages.result_page(f"Too many rows selected (the limit is {MAX_BATCH}).", False, back, info), 400)
+                return
+            found = logreader.find_many(ctx.log_dir, keys)
+            records = [found[k] for k in keys if k in found]
+            missing = len(keys) - len(records)
+            action = form.get("action", "")
+            if not action:  # first step: show what was selected and what can be done with it
+                values = [f"{ts}|{message_id}" for message_id, ts in keys]
+                chosen = form.get("choose", "")
+                self._html(pages.batch_page(records, missing, values, ctx.token, info, chosen if chosen in BATCH_ACTIONS else "", ret))
+                return
+            try:
+                results = ctx.actions.batch(action, records)
+            except ActionError as exc:
+                self._html(pages.result_page(str(exc), False, back, info), 400)
+                return
+            if action == "delete-row":
+                ctx.stats_cache = (0.0, None)
+            self._html(pages.batch_result_page(action, results, missing, info, ret))
 
         def _act(self, form):
             info = logreader.header(ctx.log_dir)
             back = pages.link("/message", {"id": form.get("id", ""), "ts": form.get("ts", "")}, "Back to the message")
+            if form.get("action") == "delete-row":
+                back = pages.link("/", {}, "Back to the decisions")
             record = logreader.find(ctx.log_dir, form.get("id", ""), form.get("ts", ""))
             if record is None:
                 self._html(pages.result_page("That record is not in the log.", False, back, info), 404)
@@ -206,9 +312,12 @@ def make_handler(ctx: Context):
                 elif action == "restore-inbox":
                     message = ctx.actions.restore(record, "inbox")
                 elif action == "allow-address":
-                    message = ctx.actions.allowlist("address", record.get("from_addr", ""))
+                    message = ctx.actions.allowlist("address", record.get("from_addr", ""), record.get("current_message_id") or "")
+                elif action == "delete-row":
+                    message = ctx.actions.delete_row(record)
+                    ctx.stats_cache = (0.0, None)
                 elif action == "allow-domain":
-                    message = ctx.actions.allowlist("domain", record.get("from_addr", ""))
+                    message = ctx.actions.allowlist("domain", record.get("from_addr", ""), record.get("current_message_id") or "")
                 else:
                     raise ActionError("Unknown action.")
             except ActionError as exc:

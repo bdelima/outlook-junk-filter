@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..logs import read_tombstones
+
 NAME = "decisions.jsonl"
 ROTATED = 9
 PER_PAGE = 100
@@ -32,6 +34,7 @@ def log_files(log_dir: Path) -> list:
 def iter_records(log_dir: Path, stats: Stats | None = None, newest_first: bool = True):
     """Yield records, newest first by default. Malformed and half-written lines are skipped and counted."""
     files = log_files(log_dir)
+    hidden = read_tombstones(log_dir)  # rows deleted from the review page, until the next prune removes them
     if not newest_first:
         files.reverse()
     for path in files:
@@ -54,6 +57,8 @@ def iter_records(log_dir: Path, stats: Stats | None = None, newest_first: bool =
             if not isinstance(record, dict):
                 if stats is not None:
                     stats.skipped += 1
+                continue
+            if hidden and (record.get("message_id"), record.get("ts")) in hidden:
                 continue
             yield record
 
@@ -97,6 +102,26 @@ def _score_key(record: dict) -> float:
     return float(score) if isinstance(score, (int, float)) else float("-inf")
 
 
+SORTS = ("time", "sender", "subject", "score", "scl", "decision")
+
+
+def _value(record: dict, sort: str):
+    """The value a column sorts by, or None when the record has none."""
+    if sort == "score":
+        value = record.get("score")
+    elif sort == "scl":
+        value = record.get("ms_scl")
+    elif sort == "sender":
+        value = str(record.get("from_addr") or "").casefold() or None
+    elif sort == "subject":
+        value = str(record.get("subject") or "").casefold() or None
+    else:
+        value = str(record.get("decision") or "") or None
+    if sort in ("score", "scl"):
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return value
+
+
 @dataclass
 class Page:
     rows: list = field(default_factory=list)
@@ -112,7 +137,7 @@ def query(log_dir: Path, filters: Filters, sort: str = "time", order: str = "des
     # a descending time sort is the natural newest-first order
     newest_first = not (sort == "time" and order == "asc")
     matched = (r for r in iter_records(log_dir, stats, newest_first) if filters.matches(r))
-    if sort == "score":
+    if sort in SORTS and sort != "time":
         total = 0
 
         def counted():
@@ -121,11 +146,14 @@ def query(log_dir: Path, filters: Filters, sort: str = "time", order: str = "des
                 total += 1
                 yield record
 
-        if order == "desc":
-            ranked = heapq.nlargest(end, counted(), key=_score_key)  # records without a score sort last
+        empty = "" if sort not in ("score", "scl") else 0.0
+        if order == "desc":  # records without a value sort last
+            ranked = heapq.nlargest(
+                end, counted(), key=lambda r: (_value(r, sort) is not None, _value(r, sort) if _value(r, sort) is not None else empty)
+            )
         else:
             ranked = heapq.nsmallest(
-                end, counted(), key=lambda r: (not isinstance(r.get("score"), (int, float)), _score_key(r))
+                end, counted(), key=lambda r: (_value(r, sort) is None, _value(r, sort) if _value(r, sort) is not None else empty)
             )
         return Page(ranked[start:end], total, stats.skipped)
     rows, total = [], 0
@@ -147,6 +175,19 @@ def find(log_dir: Path, message_id: str, ts: str) -> dict | None:
         if record.get("message_id") == message_id and record.get("ts") == ts:
             return record
     return None
+
+
+def find_many(log_dir: Path, keys) -> dict:
+    """The records for several (message_id, ts) pairs in one pass over the log; a pair that is not logged is absent."""
+    wanted = set(keys)
+    found = {}
+    for record in iter_records(log_dir):
+        key = (record.get("message_id"), record.get("ts"))
+        if key in wanted and key not in found:
+            found[key] = record
+            if len(found) == len(wanted):
+                break
+    return found
 
 
 def header(log_dir: Path, now: datetime | None = None) -> dict:

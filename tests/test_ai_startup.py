@@ -97,6 +97,9 @@ class SignedIn:
     def silent(self):
         return SilentResult(token="t")
 
+    def account_name(self):
+        return "me@example.invalid"
+
     def access_token(self):
         return "t"
 
