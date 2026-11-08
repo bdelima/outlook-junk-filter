@@ -138,6 +138,9 @@ requests, and escapes everything it shows, because senders and subjects come fro
 - **Filter** by decision, date range and score range, and search sender and subject; **sort** by clicking a column heading
   (time, sender, subject, score, SCL, decision). 100 rows per page. **Export CSV** follows the filters (cells that begin with
   `=`, `+`, `-` or `@` are prefixed so a spreadsheet does not run them).
+- **Decision values:** `keep`, `quarantined`, `deleted` (moved to Deleted Items), `permanently-deleted`, `error` (kept; will retry or gave up), and, in
+  `report-only` mode only, `would-quarantine` and `would-delete`: what the job *would* have done. Nothing was changed in the mailbox.
+  A score or SCL that was not recorded shows `N/A`.
 - **Resize columns** by dragging a column edge (double-click resets); widths are remembered in the browser.
 - **Hover a score** (or Tab to it) for a bubble: the decision and why; the rules that fired in plain English, as *Against it*
   and *In its favor* (strongest first, the rest counted); and the AI rating with its reason. Wording comes from a built-in

@@ -153,3 +153,26 @@ def test_the_header_links_sort_and_headings_stay_on_one_line(web):
 def test_the_ui_script_is_served_with_the_resize_code(web):
     status, headers, body = request(web, "GET", "/static/ui.js")
     assert status == 200 and "ojf-column-widths" in body and headers["Content-Type"].startswith("text/javascript")
+
+
+def test_a_missing_score_or_scl_shows_na_not_a_dash(web):
+    write(web.ctx.log_dir, "decisions.jsonl.6", [rec(7, score=None, ms_scl=None, ts="2026-11-02T09:00:00Z")])
+    page = request(web, "GET", "/")[2]
+    assert ">N/A</span>" in page  # the score
+    assert '<td class="num">N/A</td>' in page  # the SCL
+    assert '<td class="num">-</td>' not in page
+    csv = request(web, "GET", "/export.csv")[2]
+    assert "subject 7,,,keep" in csv  # a missing score is an empty cell in the CSV (not a formula-escaped dash)
+
+
+def test_report_only_decisions_are_explained_in_the_filter_and_the_table(web):
+    page = request(web, "GET", "/")[2]
+    assert "would-delete (report-only)" in page and "would-quarantine (report-only)" in page
+    assert "it would have been deleted (nothing was changed)" in page
+    write(web.ctx.log_dir, "decisions.jsonl.7", [rec(8, decision="would-delete", ts="2026-11-02T08:00:00Z")])
+    assert '<td title="report-only: it would have been deleted (nothing was changed)">would-delete</td>' in request(web, "GET", "/")[2]
+
+
+def test_the_pulldown_list_gets_real_colors(web):
+    css = request(web, "GET", "/static/style.css")[2]
+    assert "select option { background-color: Canvas; color: CanvasText; }" in css
