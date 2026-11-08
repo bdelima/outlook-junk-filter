@@ -6,7 +6,8 @@
 report_safe 0
 
 # Bayes lives in the state mount. It stays inactive until it has learned
-# 200 spam and 200 non-spam messages, and v1 has no training loop.
+# 200 spam and 200 non-spam messages. Auto-learn (below) and the review page's
+# "Teach spam / not spam" actions both train it.
 bayes_path /state/bayes/bayes
 
 # SpamAssassin's own auto-learn (on by default): it trains Bayes from messages that score far enough from the
