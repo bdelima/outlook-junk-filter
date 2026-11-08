@@ -93,6 +93,20 @@ class FakeGraph:
         self.calls.append(("old_messages", folder_id, received_before))
         return [m for m in self.quarantined if m["receivedDateTime"] < received_before]
 
+    def master_categories(self):
+        return [{"displayName": "Spam"}]
+
+    def create_master_category(self, name, color):
+        self.calls.append(("create_category", name, color))
+
+    def categorized_messages(self, folder, names):
+        return []
+
+    def set_categories(self, message_id, categories):
+        self.calls.append(("categories", message_id, list(categories)))
+        if getattr(self, "fail_tag", False):
+            raise GraphError(403, "no")
+
     def actions(self):
         return [c for c in self.calls if c[0] in ("move", "permanentDelete")]
 

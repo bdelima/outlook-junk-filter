@@ -10,6 +10,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from .ai import AiError, extract_text
+from .categories import DELETED
 from .graph import GraphError, NetworkError
 from .logs import SUBJECT_MAX, histogram
 from .scoring import ScoreError
@@ -157,13 +158,22 @@ class Runner:
 
     # ------------------------------------------------------------------ one message
 
-    def _delete(self, message_id: str) -> tuple:
+    def _delete(self, message: dict) -> tuple:
         """Delete as OJF_DELETE_MODE says. Returns (decision, new message id, folder)."""
         if self.cfg.delete_mode == "permanent":
-            self.graph.permanent_delete(message_id)
+            self.graph.permanent_delete(message["id"])
             return "permanently-deleted", "", ""
-        new_id = self.graph.move_to_deleted_items(message_id)
-        return "deleted", new_id or message_id, "deleteditems"
+        new_id = self.graph.move_to_deleted_items(message["id"]) or message["id"]
+        self._tag_deleted(message, new_id)
+        return "deleted", new_id, "deleteditems"
+
+    def _tag_deleted(self, message, new_id: str) -> None:
+        """Mark a message the job moved to Deleted Items. Never fatal: the move already happened."""
+        categories = [c for c in (message.get("categories") or []) if c != DELETED]
+        try:
+            self.graph.set_categories(new_id, [*categories, DELETED])
+        except GraphError as exc:
+            self.log.warning("moved a message to Deleted Items but could not tag it %r: %s", DELETED, exc)
 
     def _process(self, message, mode, counts, scores) -> None:
         # 0. a message restored from the review page is kept and not rescored
@@ -218,7 +228,7 @@ class Runner:
                 counts["would-delete"] += 1
                 return
             try:
-                decision, new_id, folder = self._delete(message["id"])
+                decision, new_id, folder = self._delete(message)
             except NetworkError:
                 raise
             except GraphError as exc:
@@ -273,7 +283,7 @@ class Runner:
         cutoff = (self.now() - timedelta(days=self.cfg.quarantine_retention_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         for message in self.graph.old_messages(folder_id, cutoff):
             try:
-                decision, new_id, folder = self._delete(message["id"])
+                decision, new_id, folder = self._delete(message)
             except NetworkError:
                 raise
             except GraphError as exc:

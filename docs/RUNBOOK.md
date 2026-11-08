@@ -23,7 +23,7 @@ Commands that talk to Docker assume `sudo docker ...` on the host. Replace `HOST
 ### Prepare (once)
 
 1. **App registration** (Microsoft's app registration portal): new registration, *Personal Microsoft accounts only*, no redirect
-   URI, *Allow public client flows* = **Yes**, Microsoft Graph **delegated** permission `Mail.ReadWrite`. Copy the
+   URI, *Allow public client flows* = **Yes**, Microsoft Graph **delegated** permissions `Mail.ReadWrite` and `MailboxSettings.ReadWrite`. Copy the
    *Application (client) ID*. It is not a secret.
 2. **Host folders** (owned by 1000:1000, mode 700):
 
@@ -123,6 +123,23 @@ After an upgrade that changes scoring (new rules, thresholds), recheck the quara
 | Export | *Export CSV* (follows the filters) |
 
 Ticks reset when the page reloads, and a batch covers the current page (at most 200 rows).
+
+### Outlook categories (0.13.0 and later)
+
+Category hooks are on from 0.13.0 with no setting. **Upgrading from 0.12.x needs two steps, once per mailbox:**
+
+1. In Microsoft's app registration portal add the delegated permission **`MailboxSettings.ReadWrite`** to the app (Bob's and the
+   second instance use the same registration if you registered one).
+2. After the image is pulled, watch the logs for `SIGN-IN NEEDED: open ... enter code ...` and sign in again (the old token does not
+   have the new scope). Each mailbox signs in separately.
+
+The job then creates 13 categories in the mailbox (`Spam`, `Not Spam`, `Allow Sender`, `Allow Domain`, `Restore to Junk`, a green
+`... ✓` marker for each, `Conflict`, `Failure` and `Deleted ✓`). To use one, right-click a message in Junk, Deleted Items or
+the quarantine folder, choose Categorize, and pick an action category; within one interval (900 s by default) it is replaced by
+its green marker. If a message gets `Failure`, read the log line `category action ... failed`, fix the cause, and remove `Failure`
+to retry. `Conflict` means two action categories were applied; remove one. If the sign-in or category creation fails, the Junk scan
+still runs and the log shows `Graph call failed` or `could not ... categor`. Rolling back to 0.12.x needs no change (the extra scope
+is harmless); the categories simply stop being read.
 
 ### Logs and pruning
 

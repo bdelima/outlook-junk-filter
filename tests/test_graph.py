@@ -159,3 +159,23 @@ def test_old_messages_filters_by_received_time_and_follows_next_link():
     assert [m["id"] for m in c.old_messages("FID", "2026-11-01T00:00:00Z")] == ["1", "2"]
     assert "receivedDateTime%20lt%202026-11-01T00%3A00%3A00Z" in session.requests[0][1]
     assert session.requests[1][1] == "NEXT"
+
+
+def test_categorized_messages_uses_or_only_pages_and_selects_categories():
+    c, session = client([Resp(data={"value": [{"id": "1"}], "@odata.nextLink": "NEXT"}), Resp(data={"value": [{"id": "2"}]})])
+    got = c.categorized_messages("deleteditems", ["Spam", "Not Spam"])
+    assert [m["id"] for m in got] == ["1", "2"]
+    url = session.requests[0][1]
+    assert "/mailFolders/deleteditems/messages?" in url and "categories" in url.split("select=")[1]
+    assert "%20or%20" in url and "%20and%20" not in url and "Not%20Spam" in url
+    assert session.requests[1][1] == "NEXT"
+
+
+def test_set_categories_patches_and_master_categories_are_created_with_a_color():
+    c, session = client([Resp(data={}), Resp(data={"value": [{"displayName": "Spam"}]}), Resp(201, data={"id": "x"})])
+    c.set_categories("a/b", ["Spam"])
+    assert c.master_categories() == [{"displayName": "Spam"}]
+    c.create_master_category("Failure", "Preset0")
+    assert session.requests[0][0] == "PATCH" and session.requests[0][1].endswith("/me/messages/a%2Fb")
+    assert session.requests[0][2]["json"] == {"categories": ["Spam"]}
+    assert session.requests[2][2]["json"] == {"displayName": "Failure", "color": "Preset0"}

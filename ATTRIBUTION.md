@@ -54,7 +54,7 @@ Python packages below. The licenses were read from the sources named in each ent
 ## Services
 
 - **Microsoft Graph** and the **Microsoft identity platform** are called as web APIs only. No Microsoft code is
-  included beyond the `msal` library above, and the job uses only the delegated `Mail.ReadWrite` permission.
+  included beyond the `msal` library above, and the job uses only the delegated `Mail.ReadWrite` and `MailboxSettings.ReadWrite` permissions (the second one only to create Outlook categories).
 
 ## Trademarks
 

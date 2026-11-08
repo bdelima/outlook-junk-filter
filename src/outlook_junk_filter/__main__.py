@@ -11,6 +11,7 @@ from . import config as config_module
 from . import scoring
 from .ai import AiClient
 from .auth import Auth, AuthError
+from .categories import CategoryHooks
 from .graph import GraphClient, GraphError, NetworkError
 from .logs import DecisionLog, setup_container_log, touch_health
 from .restored import RestoredList
@@ -59,13 +60,14 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
     def score_fn(raw: bytes):
         return scoring.score(raw, cfg.state_dir, config_dir)
 
-    def run_once(lint_ok: bool) -> None:
+    actions = Actions(graph, restored, cfg.state_dir, Path(config_dir))
+    hooks = CategoryHooks(cfg, graph, actions, log)
+
+    def guarded(step) -> bool:
+        """Run one step of a pass; a failure is logged and never stops the loop."""
         try:
-            if not lint_ok:
-                log.error("ERROR SpamAssassin's config does not load; scoring nothing and keeping every message")
-                return
-            Runner(cfg, graph, state, decisions, log, score_fn, touch, restored=restored, ai=ai).run()
-            write_status(cfg.state_dir, last_scan=_now())
+            step()
+            return True
         except NetworkError as exc:
             log.error("network failure, skipping this run: %s", exc)
         except AuthError as exc:
@@ -74,11 +76,20 @@ def main(state_dir: Path = Path("/state"), config_dir: str = scoring.CONFIG_DIR,
             log.error("Graph call failed, skipping this run: %s", exc)
         except Exception:  # an unexpected error must never stop the loop
             log.exception("unexpected error, carrying on")
+        return False
+
+    def run_once(lint_ok: bool) -> None:
+        try:
+            if not lint_ok:
+                log.error("ERROR SpamAssassin's config does not load; scoring nothing and keeping every message")
+                return
+            if guarded(lambda: Runner(cfg, graph, state, decisions, log, score_fn, touch, restored=restored, ai=ai).run()):
+                write_status(cfg.state_dir, last_scan=_now())
+            guarded(hooks.run)  # categories a person applied in Outlook; independent of the Junk pass
         finally:
             touch()
 
     try:  # the review page lives in this process; if it cannot start, the job still runs
-        actions = Actions(graph, restored, cfg.state_dir, Path(config_dir))
         serve_in_thread(cfg.ui_port, Context(cfg.state_dir / "logs", actions, csrf=cfg.ui_csrf))
         log.info("Review page on port %d", cfg.ui_port)
     except OSError as exc:
