@@ -1,6 +1,6 @@
 # Portainer stack for outlook-junk-filter. The only published port is the review page (60888 by default);
 # no network is declared. Put the page behind Nginx Proxy Manager: it has no login of its own. Set the variables in Portainer's Environment variables panel, not in a
-# .env file. Create the host directories once (owned by uid/gid 1000, mode 700):
+# .env file. For a second mailbox, add a second service with its own folders and port (docs/RUNBOOK.md, "A second mailbox"). Create the host directories once (owned by uid/gid 1000, mode 700):
 #   sudo install -d -m 700 -o 1000 -g 1000 /opt/outlook-junk-filter /opt/outlook-junk-filter/state /opt/outlook-junk-filter/config
 services:
   outlook-junk-filter:
