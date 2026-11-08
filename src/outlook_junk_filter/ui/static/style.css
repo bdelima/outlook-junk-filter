@@ -1,15 +1,80 @@
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-body { margin: 0; padding: 0 16px 32px; max-width: 1200px; margin-inline: auto; }
-nav { padding: 12px 0; display: flex; gap: 16px; align-items: baseline; border-bottom: 1px solid #8885; }
-h1 { font-size: 1.3rem; }
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; --line: #8884; --soft: #8881; --accent: #2563eb; }
+body { margin: 0; padding: 0 16px 32px; max-width: 1500px; margin-inline: auto; }
+h1 { font-size: 1.25rem; margin: 16px 0 12px; }
 h2 { font-size: 1.05rem; margin-top: 1.5rem; }
+a { color: var(--accent); }
+
+nav { padding: 10px 0; display: flex; gap: 18px; align-items: baseline; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+nav a { text-decoration: none; color: inherit; opacity: 0.75; padding-bottom: 2px; }
+nav a:hover { opacity: 1; }
+nav a.on { opacity: 1; border-bottom: 2px solid currentColor; }
+.status { margin-left: auto; font-size: 0.8rem; opacity: 0.7; }
+
 table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
-th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #8884; vertical-align: top; overflow-wrap: anywhere; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .meta, .pager { font-size: 0.85rem; opacity: 0.8; }
-.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .error { color: #b00020; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; }
 dt { font-weight: 600; }
 dd { margin: 0; overflow-wrap: anywhere; }
-@media (max-width: 700px) { table { font-size: 0.8rem; } dl { grid-template-columns: 1fr; } }
+.none { opacity: 0.55; }
+.ok { color: #15803d; }
+code.tok { font-size: 0.75rem; opacity: 0.6; margin-left: 4px; }
+
+/* one-line toolbar */
+.filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 0; }
+.filters label { display: inline-flex; gap: 4px; align-items: center; font-size: 0.85rem; white-space: nowrap; }
+.filters .grow { flex: 1 1 200px; min-width: 160px; }
+input, select, button, .btn { font: inherit; font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+button, .btn { cursor: pointer; text-decoration: none; display: inline-block; }
+button:hover, .btn:hover { background: var(--soft); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* selection bar */
+.selbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 6px 8px; min-height: 2rem; border-radius: 6px; background: var(--soft); margin-bottom: 6px; }
+.selinfo { display: flex; gap: 10px; align-items: center; }
+.selinfo[hidden] { display: none; }
+.selbar .pager { margin-left: auto; }
+details.actions { position: relative; }
+details.actions summary { list-style: none; }
+details.actions summary::-webkit-details-marker { display: none; }
+.menu { position: absolute; z-index: 20; top: 110%; left: 0; min-width: 250px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: Canvas; box-shadow: 0 6px 20px #0003; display: flex; flex-direction: column; }
+.menu .item { text-align: left; border: 0; display: flex; justify-content: space-between; gap: 12px; }
+.menu .n { opacity: 0.6; }
+
+/* the table: fixed layout, one-line headings, resizable columns */
+.tablewrap { overflow-x: auto; padding-bottom: 260px; margin-bottom: -260px; }
+#decisions { table-layout: fixed; width: auto; min-width: 100%; }
+#decisions th { position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 14px; font-weight: 600; font-size: 0.85rem; }
+#decisions th a.h, #decisions th .h { color: inherit; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; }
+#decisions th a.h:hover { text-decoration: underline; }
+#decisions td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#decisions td.chk, #decisions th.chk { padding-left: 4px; padding-right: 4px; text-align: center; }
+#decisions th.chk { padding-right: 4px; }
+#decisions td.sc { overflow: visible; position: relative; }
+#decisions td.chips { white-space: normal; }
+.grip { position: absolute; right: 0; top: 15%; height: 70%; width: 8px; cursor: col-resize; border-right: 1px solid var(--line); }
+.grip:hover { border-right: 2px solid var(--accent); }
+
+.chip { display: inline-block; font-size: 0.72rem; padding: 1px 7px; margin: 0 3px 2px 0; border-radius: 10px; background: #16a34a22; color: #15803d; }
+.chip.spam { background: #2563eb22; color: #1d4ed8; }
+.chip.allow { background: #d9770622; color: #b45309; }
+@media (prefers-color-scheme: dark) { .chip { color: #86efac; } .chip.spam { color: #93c5fd; } .chip.allow { color: #fcd34d; } .ok { color: #86efac; } }
+
+/* the hover bubble over a score */
+.score { border-bottom: 1px dotted currentColor; cursor: help; }
+.tip { display: none; position: absolute; z-index: 30; right: 0; top: 100%; width: 340px; padding: 10px 12px; text-align: left; white-space: normal; font-size: 0.82rem; line-height: 1.45; font-weight: 400; border: 1px solid var(--line); border-radius: 8px; background: Canvas; color: CanvasText; box-shadow: 0 6px 20px #0003; }
+.tip p { margin: 0 0 6px; }
+.tip p:last-child { margin: 0; }
+.tip .k { display: block; font-size: 0.7rem; text-transform: none; opacity: 0.6; }
+td.sc:hover .tip, td.sc:focus-within .tip { display: block; }
+
+.detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); gap: 28px; align-items: start; }
+aside { border: 1px solid var(--line); border-radius: 8px; padding: 4px 14px 12px; }
+aside h2 { margin-top: 0.8rem; }
+.arow { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.88rem; }
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.pager.below { margin-top: 18px; }
+
+@media (max-width: 800px) { .detail { grid-template-columns: 1fr; } dl { grid-template-columns: 1fr; } .status { margin-left: 0; width: 100%; } }

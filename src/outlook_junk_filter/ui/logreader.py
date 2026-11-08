@@ -97,6 +97,26 @@ def _score_key(record: dict) -> float:
     return float(score) if isinstance(score, (int, float)) else float("-inf")
 
 
+SORTS = ("time", "sender", "subject", "score", "scl", "decision")
+
+
+def _value(record: dict, sort: str):
+    """The value a column sorts by, or None when the record has none."""
+    if sort == "score":
+        value = record.get("score")
+    elif sort == "scl":
+        value = record.get("ms_scl")
+    elif sort == "sender":
+        value = str(record.get("from_addr") or "").casefold() or None
+    elif sort == "subject":
+        value = str(record.get("subject") or "").casefold() or None
+    else:
+        value = str(record.get("decision") or "") or None
+    if sort in ("score", "scl"):
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return value
+
+
 @dataclass
 class Page:
     rows: list = field(default_factory=list)
@@ -112,7 +132,7 @@ def query(log_dir: Path, filters: Filters, sort: str = "time", order: str = "des
     # a descending time sort is the natural newest-first order
     newest_first = not (sort == "time" and order == "asc")
     matched = (r for r in iter_records(log_dir, stats, newest_first) if filters.matches(r))
-    if sort == "score":
+    if sort in SORTS and sort != "time":
         total = 0
 
         def counted():
@@ -121,11 +141,14 @@ def query(log_dir: Path, filters: Filters, sort: str = "time", order: str = "des
                 total += 1
                 yield record
 
-        if order == "desc":
-            ranked = heapq.nlargest(end, counted(), key=_score_key)  # records without a score sort last
+        empty = "" if sort not in ("score", "scl") else 0.0
+        if order == "desc":  # records without a value sort last
+            ranked = heapq.nlargest(
+                end, counted(), key=lambda r: (_value(r, sort) is not None, _value(r, sort) if _value(r, sort) is not None else empty)
+            )
         else:
             ranked = heapq.nsmallest(
-                end, counted(), key=lambda r: (not isinstance(r.get("score"), (int, float)), _score_key(r))
+                end, counted(), key=lambda r: (_value(r, sort) is None, _value(r, sort) if _value(r, sort) is not None else empty)
             )
         return Page(ranked[start:end], total, stats.skipped)
     rows, total = [], 0

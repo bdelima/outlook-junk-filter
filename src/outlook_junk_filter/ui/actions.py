@@ -40,7 +40,7 @@ def can_restore(record: dict) -> bool:
     return can_teach(record) and record.get("folder") not in RESTORABLE_FROM_EXCLUDED
 
 
-BATCH_ACTIONS = ("teach-spam", "teach-ham", "restore-junk", "restore-inbox")
+BATCH_ACTIONS = ("teach-spam", "teach-ham", "restore-junk", "restore-inbox", "allow-address", "allow-domain")
 
 
 def eligible(action: str, record: dict) -> bool:
@@ -49,6 +49,8 @@ def eligible(action: str, record: dict) -> bool:
         return can_teach(record)
     if action in ("restore-junk", "restore-inbox"):
         return can_restore(record)
+    if action in ("allow-address", "allow-domain"):
+        return bool(_ADDRESS.match(str(record.get("from_addr") or "").strip().lower()))
     return False
 
 
@@ -116,7 +118,7 @@ class Actions:
 
     # ------------------------------------------------------------------ allowlist
 
-    def allowlist(self, kind: str, from_addr: str) -> str:
+    def allowlist(self, kind: str, from_addr: str, message_id: str = "") -> str:
         """Add a sender address or its domain as a whitelist_auth line (SPF or DKIM must pass for it to count)."""
         address = (from_addr or "").strip().lower()
         if not _ADDRESS.match(address):
@@ -146,7 +148,7 @@ class Actions:
                     os.replace(tmp, path)
                 except OSError as exc:
                     raise ActionError("Could not write the allowlist file (is /config writable?).") from exc
-        self._record("allowlist", "", entry)
+        self._record("allowlist", message_id, entry)
         return f"Allowlisted {entry}. It takes effect on the next scoring pass."
 
     # ------------------------------------------------------------------ restore
@@ -182,12 +184,21 @@ class Actions:
             if not eligible(action, record):
                 results.append((record, False, "Skipped: this action does not apply to the message's current state."))
                 continue
-            if target in seen:
-                results.append((record, False, "Skipped: the same message was selected more than once."))
+            sender = str(record.get("from_addr") or "").strip().lower()
+            if action == "allow-domain":
+                sender = sender.split("@", 1)[1]
+            key = sender if action.startswith("allow-") else target
+            if key in seen:
+                note = "the same sender or domain" if action.startswith("allow-") else "the same message"
+                results.append((record, False, f"Skipped: {note} was selected more than once."))
                 continue
-            seen.add(target)
+            seen.add(key)
             try:
-                if action == "teach-spam":
+                if action.startswith("allow-"):
+                    message = self.allowlist(
+                        "domain" if action == "allow-domain" else "address", record.get("from_addr", ""), target or record.get("message_id", "")
+                    )
+                elif action == "teach-spam":
                     message = self.teach(record, spam=True)
                 elif action == "teach-ham":
                     message = self.teach(record, spam=False)

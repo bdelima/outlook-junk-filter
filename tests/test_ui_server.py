@@ -84,7 +84,7 @@ def detail_query(message_id, ts):
 def test_decisions_page_escapes_a_hostile_subject(web):
     status, headers, body = request(web, "GET", "/")
     assert status == 200
-    own = '<script src="/static/batch.js"></script>'  # the page's only script is its own file
+    own = '<script src="/static/ui.js"></script>'  # the page's only script is its own file
     assert own in body and "<script" not in body.replace(own, "") and "<img" not in body  # nothing from the subject survives
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
     detail = request(web, "GET", "/message?" + detail_query("M1", "2026-11-05T10:00:00Z"))[2]
@@ -101,14 +101,14 @@ def test_security_headers_and_no_external_requests(web):
         assert headers["X-Content-Type-Options"] == "nosniff"
     html = request(web, "GET", "/")[2]
     assert not re.search(r"(src|href)=\"(https?:)?//", html)
-    assert "<script" not in html.replace('<script src="/static/batch.js"></script>', "")  # only our own file
+    assert "<script" not in html.replace('<script src="/static/ui.js"></script>', "")  # only our own file
 
 
 def test_message_detail_lists_every_field_and_the_rules(web):
     html = request(web, "GET", "/message?" + detail_query("M1", "2026-11-05T10:00:00Z"))[2]
     for name in ("message_id", "internet_message_id", "current_message_id", "folder", "first_untrusted_ip", "action_error"):
         assert f"<dt>{name}</dt>" in html
-    assert "<li>A</li>" in html
+    assert '<code class="tok">A</code>' in html
 
 
 def test_unknown_message_and_page_are_404(web):

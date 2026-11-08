@@ -13,8 +13,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import logreader, pages
-from .actions import ActionError
+from . import history, logreader, pages
+from .actions import BATCH_ACTIONS, ActionError
+from .rules import default_rules
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 4096
@@ -105,8 +106,8 @@ def make_handler(ctx: Context):
                     self._confirm(params)
                 elif path == "/static/style.css":
                     self._send(200, (STATIC / "style.css").read_bytes(), "text/css; charset=utf-8")
-                elif path == "/static/batch.js":
-                    self._send(200, (STATIC / "batch.js").read_bytes(), "text/javascript; charset=utf-8")
+                elif path == "/static/ui.js":
+                    self._send(200, (STATIC / "ui.js").read_bytes(), "text/javascript; charset=utf-8")
                 else:
                     self._html(pages.layout("Not found", "<p>No such page.</p>"), 404)
             except BrokenPipeError:
@@ -117,12 +118,15 @@ def make_handler(ctx: Context):
                 page_no = max(1, int(params.get("page", "1") or 1))
             except ValueError:
                 page_no = 1
-            sort = params.get("sort", "time") if params.get("sort") in ("time", "score") else "time"
+            sort = params.get("sort", "time") if params.get("sort") in logreader.SORTS else "time"
             order = params.get("order", "desc") if params.get("order") in ("asc", "desc") else "desc"
             page = logreader.query(ctx.log_dir, filters_from(params), sort, order, page_no)
             view = {**params, "page": str(page_no), "sort": sort, "order": order}
             self._html(
-                pages.decisions_page(page, view, logreader.header(ctx.log_dir), ctx.token, can_act=ctx.actions is not None)
+                pages.decisions_page(
+                    page, view, logreader.header(ctx.log_dir), ctx.token, ctx.actions is not None,
+                    history.load(ctx.log_dir), default_rules(),
+                )
             )
 
         def _record(self, params):
@@ -133,7 +137,7 @@ def make_handler(ctx: Context):
             if record is None:
                 self._html(pages.layout("Not found", "<p>That record is not in the log (it may have rotated out).</p>"), 404)
                 return
-            self._html(pages.message_page(record, logreader.header(ctx.log_dir)))
+            self._html(pages.message_page(record, logreader.header(ctx.log_dir), history.load(ctx.log_dir), default_rules()))
 
         def _whatif(self, params):
             q, d = _float(params.get("quarantine", "")), _float(params.get("delete", ""))
@@ -221,7 +225,8 @@ def make_handler(ctx: Context):
             action = form.get("action", "")
             if not action:  # first step: show what was selected and what can be done with it
                 values = [f"{ts}|{message_id}" for message_id, ts in keys]
-                self._html(pages.batch_page(records, missing, values, ctx.token, info))
+                chosen = form.get("choose", "")
+                self._html(pages.batch_page(records, missing, values, ctx.token, info, chosen if chosen in BATCH_ACTIONS else ""))
                 return
             try:
                 results = ctx.actions.batch(action, records)
@@ -251,9 +256,9 @@ def make_handler(ctx: Context):
                 elif action == "restore-inbox":
                     message = ctx.actions.restore(record, "inbox")
                 elif action == "allow-address":
-                    message = ctx.actions.allowlist("address", record.get("from_addr", ""))
+                    message = ctx.actions.allowlist("address", record.get("from_addr", ""), record.get("current_message_id") or "")
                 elif action == "allow-domain":
-                    message = ctx.actions.allowlist("domain", record.get("from_addr", ""))
+                    message = ctx.actions.allowlist("domain", record.get("from_addr", ""), record.get("current_message_id") or "")
                 else:
                     raise ActionError("Unknown action.")
             except ActionError as exc:

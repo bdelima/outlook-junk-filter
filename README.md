@@ -138,6 +138,16 @@ shows, because senders and subjects come from phishing mail.
   to; the rest are skipped and listed with the reason, and one failure does not stop the others. Rows that are gone
   from Outlook have no box. Teaching runs one message at a time, so a big selection takes a while. Each message is
   recorded in `actions.jsonl` like a single action. At most 200 rows per batch.
+- **Actions taken** column and indicators: each row shows chips for what was already done (Spam, Not spam, Restored,
+  and Address or Domain when the sender is allowlisted), read from `actions.jsonl`; the message page shows each action
+  as done (with its time) or not done. A chip belongs to the message's id in Outlook, so a message that was moved
+  and later logged again under a new id shows no chip on the newer row.
+- **Score bubble:** hover (or Tab to) a score for the decision and why, the rules that fired in plain English
+  (*Against it* and *In its favor*, the strongest first, the rest counted), and the AI rating with its reason.
+  Wording comes from a built-in phrase list, then SpamAssassin's own rule descriptions, ordered by its stock scores. The
+  message page lists every rule with its description and the original rule name.
+- **Layout:** sort by clicking a column heading; drag a column edge to resize it (double-click resets; widths are kept
+  in this browser). The batch actions menu also offers *Allowlist sender address* and *domain*.
 - **Auto-learn:** SpamAssassin's own `bayes_auto_learn` is on by default (`config/local.cf.example` carries the line, and
   `0` turns it off). Manual teaching works either way and corrects what auto-learn gets wrong.
 

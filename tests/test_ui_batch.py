@@ -28,9 +28,9 @@ def post(web, selected, action=None, token=None, extra=()):
 def test_the_decisions_page_has_a_tick_box_only_on_rows_an_action_could_apply_to(web):
     body = request(web, "GET", "/")[2]
     boxes = re.findall(r'name="sel" value="([^"]+)"', body)
-    assert set(boxes) == {M1, M2, M4}  # M3 is permanently deleted
+    assert set(boxes) == {M1, M2, M3, M4}  # M3 is gone from Outlook but its sender can still be allowlisted
     assert 'id="select-all"' in body and 'action="/batch"' in body and web.ctx.token in body
-    assert request(web, "GET", "/static/batch.js")[0] == 200
+    assert request(web, "GET", "/static/ui.js")[0] == 200
 
 
 def test_the_first_step_lists_the_selection_and_the_actions_with_counts_and_changes_nothing(web):
@@ -43,8 +43,9 @@ def test_the_first_step_lists_the_selection_and_the_actions_with_counts_and_chan
 
 def test_only_the_actions_that_apply_are_offered(web):
     body = post(web, [M4])[2]
-    assert "Teach Bayes: spam (1 of 1)" in body and "Restore" not in body
-    assert "None of the selected" in post(web, [M3])[2]
+    assert "Teach Bayes: spam (1 of 1)" in body and "Restore" not in body and "Allowlist sender domain (1 of 1)" in body
+    only_allow = post(web, [M3])[2]  # permanently deleted: nothing to teach or restore, the sender can be allowlisted
+    assert "Teach Bayes" not in only_allow and "Restore" not in only_allow and "Allowlist sender address (1 of 1)" in only_allow
 
 
 def test_teaching_a_batch_skips_what_does_not_apply_and_reports_it(web):
