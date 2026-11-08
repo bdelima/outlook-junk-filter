@@ -122,7 +122,7 @@ nspam=$(docker run --rm --read-only --user 1000:1000 -v "$state:/state" -v "$cfg
 if [ "${nspam:-0}" -ge 1 ] 2>/dev/null; then ok "sa-learn teaches Bayes ($nspam spam message learned)"; else fail "sa-learn did not learn: nspam='$nspam'"; fi
 
 # 8. the review page starts as uid 1000 on a read-only root filesystem and serves the Decisions page from a fixture log;
-#    a hostile subject comes back escaped, and the page sends a Content-Security-Policy
+#    a hostile subject comes back escaped (the page's own ui.js script tag is expected), and the page sends a Content-Security-Policy
 cat > "$state_ui/logs/decisions.jsonl" <<'JSON'
 {"ts":"2026-11-06T10:00:00Z","message_id":"M1","internet_message_id":"<1@x.invalid>","received":"2026-11-06T09:00:00Z","from_addr":"evil@phish.invalid","subject":"<script>alert(1)</script>","score":12.5,"rules":["A","B"],"keep_rule_hit":false,"relays_untrusted":"","first_untrusted_ip":"","auth_results_present":true,"mode":"report-only","decision":"would-delete","reason":"score at or above the delete threshold (report-only)","action_error":"","current_message_id":"M1","folder":"junkemail"}
 JSON
@@ -133,7 +133,7 @@ for _ in $(seq 1 30); do
   page=$(curl -fsS -D "$work/headers" http://127.0.0.1:60888/ 2>/dev/null) && break
   sleep 1
 done
-if [ -n "$page" ] && echo "$page" | grep -q '&lt;script&gt;alert(1)&lt;/script&gt;' && ! echo "$page" | grep -q '<script'    && grep -qi "content-security-policy: default-src 'none'" "$work/headers"; then
+if [ -n "$page" ] && echo "$page" | grep -q '&lt;script&gt;alert(1)&lt;/script&gt;' && ! echo "$page" | grep -q '<script>alert'    && grep -qi "content-security-policy: default-src 'none'" "$work/headers"; then
   ok "the review page serves the Decisions page, escaped, with a CSP, as uid 1000 on a read-only root"
 else
   fail "review page: $(docker logs "$ui_name" 2>&1 | tail -5)"
