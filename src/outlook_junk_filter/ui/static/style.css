@@ -31,6 +31,8 @@ code.tok { font-size: 0.75rem; opacity: 0.6; margin-left: 4px; }
 .filters label { display: inline-flex; gap: 4px; align-items: center; font-size: 0.85rem; white-space: nowrap; }
 .filters .grow { flex: 1 1 200px; min-width: 160px; }
 input, select, button, .btn { font: inherit; font-size: 0.85rem; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+/* the pull-down list is drawn by the browser: give it real colors, or it shows white text on white in dark mode */
+select, select option { background-color: Canvas; color: CanvasText; }
 button, .btn { cursor: pointer; text-decoration: none; display: inline-block; }
 button:hover, .btn:hover { background: var(--soft); }
 button.danger { background: #dc2626; border-color: #dc2626; color: #fff; }

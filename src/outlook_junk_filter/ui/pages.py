@@ -92,8 +92,8 @@ def _age(seconds: int) -> str:
     return f"{seconds // 86400} days ago"
 
 
-def _score(value) -> str:
-    return f"{value:.1f}" if isinstance(value, (int, float)) else "-"
+def _score(value, missing: str = "N/A") -> str:
+    return f"{value:.1f}" if isinstance(value, (int, float)) and not isinstance(value, bool) else missing
 
 
 COLUMNS = (
@@ -111,6 +111,12 @@ COLUMNS = (
 def _time(ts) -> str:
     text = str(ts or "")
     return text[5:16].replace("T", " ") if len(text) >= 16 else text
+
+
+def _decision_title(record: dict) -> str:
+    """Hover text that explains the report-only decisions."""
+    text = DECISION_HELP.get(str(record.get("decision") or ""))
+    return f' title="{esc(text)}"' if text else ""
 
 
 def _chips(chips: list) -> str:
@@ -195,8 +201,8 @@ def decisions_page(page, params: dict, info: dict, token: str = "", can_act: boo
             f'<td title="{esc(record.get("from_addr"))}">{esc(record.get("from_addr"))}</td>'
             f'<td title="{esc(record.get("subject"))}">{esc(record.get("subject"))}</td>'
             + score_cell
-            + f'<td class="num">{esc(record.get("ms_scl") if record.get("ms_scl") is not None else "-")}</td>'
-            f"<td>{esc(record.get('decision'))}</td>"
+            + f'<td class="num">{esc(record.get("ms_scl") if record.get("ms_scl") is not None else "N/A")}</td>'
+            f"<td{_decision_title(record)}>{esc(record.get('decision'))}</td>"
             f'<td class="chips">{_chips(chips)}</td></tr>'
         )
     span = len(COLUMNS) + (1 if can_act else 0)
@@ -273,10 +279,20 @@ def _checkbox(record: dict) -> str:
     return f'<td class="chk"><input type="checkbox" name="sel" value="{esc(value)}"{data} aria-label="Select this row"></td>'
 
 
+DECISION_HELP = {
+    "would-delete": "report-only: it would have been deleted (nothing was changed)",
+    "would-quarantine": "report-only: it would have been moved to the quarantine folder (nothing was changed)",
+}
+
+
 def _options(values, selected) -> str:
-    return "".join(
-        f'<option value="{esc(v)}"{" selected" if v == selected else ""}>{esc(v or "any")}</option>' for v in values
-    )
+    out = []
+    for v in values:
+        help_text = DECISION_HELP.get(v)
+        title = f' title="{esc(help_text)}"' if help_text else ""
+        label = f"{v} (report-only)" if help_text else (v or "any")
+        out.append(f'<option value="{esc(v)}"{" selected" if v == selected else ""}{title}>{esc(label)}</option>')
+    return "".join(out)
 
 
 def message_page(record: dict, info: dict, history=None, rules=None) -> str:
@@ -446,7 +462,7 @@ def csv_rows(records):
                 csv_cell(record.get("ts")),
                 csv_cell(record.get("from_addr")),
                 csv_cell(record.get("subject")),
-                csv_cell(_score(record.get("score"))),
+                csv_cell(_score(record.get("score"), "")),
                 csv_cell("" if record.get("ms_scl") is None else record.get("ms_scl")),
                 csv_cell(record.get("decision")),
                 csv_cell(record.get("reason")),
