@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..logs import read_tombstones
+
 NAME = "decisions.jsonl"
 ROTATED = 9
 PER_PAGE = 100
@@ -32,6 +34,7 @@ def log_files(log_dir: Path) -> list:
 def iter_records(log_dir: Path, stats: Stats | None = None, newest_first: bool = True):
     """Yield records, newest first by default. Malformed and half-written lines are skipped and counted."""
     files = log_files(log_dir)
+    hidden = read_tombstones(log_dir)  # rows deleted from the review page, until the next prune removes them
     if not newest_first:
         files.reverse()
     for path in files:
@@ -54,6 +57,8 @@ def iter_records(log_dir: Path, stats: Stats | None = None, newest_first: bool =
             if not isinstance(record, dict):
                 if stats is not None:
                     stats.skipped += 1
+                continue
+            if hidden and (record.get("message_id"), record.get("ts")) in hidden:
                 continue
             yield record
 

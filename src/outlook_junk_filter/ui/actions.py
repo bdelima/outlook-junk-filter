@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..graph import GraphError, NetworkError
+from ..logs import add_tombstones
 
 ALLOWLIST_FILE = "ojf-allowlist.cf"
 ACTIONS_LOG = "actions.jsonl"
@@ -40,7 +41,7 @@ def can_restore(record: dict) -> bool:
     return can_teach(record) and record.get("folder") not in RESTORABLE_FROM_EXCLUDED
 
 
-BATCH_ACTIONS = ("teach-spam", "teach-ham", "restore-junk", "restore-inbox", "allow-address", "allow-domain")
+BATCH_ACTIONS = ("teach-spam", "teach-ham", "restore-junk", "restore-inbox", "allow-address", "allow-domain", "delete-row")
 
 
 def eligible(action: str, record: dict) -> bool:
@@ -49,6 +50,8 @@ def eligible(action: str, record: dict) -> bool:
         return can_teach(record)
     if action in ("restore-junk", "restore-inbox"):
         return can_restore(record)
+    if action == "delete-row":
+        return True
     if action in ("allow-address", "allow-domain"):
         return bool(_ADDRESS.match(str(record.get("from_addr") or "").strip().lower()))
     return False
@@ -172,12 +175,38 @@ class Actions:
         self._record("restore", message_id, destination)
         return f"Restored to {destination.capitalize()}. The job will keep it."
 
+    # ------------------------------------------------------------------ delete log rows
+
+    def delete_rows(self, records: list) -> list:
+        """Hide rows from the log now; the daily prune removes them for good. Touches nothing in Outlook."""
+        pairs, results = [], []
+        for record in records:
+            pair = (record.get("message_id", ""), record.get("ts", ""))
+            if pair in pairs:
+                results.append((record, False, "Skipped: the same row was selected more than once."))
+                continue
+            pairs.append(pair)
+            results.append((record, True, "Removed from the log."))
+        try:
+            add_tombstones(self._state / "logs", pairs)
+        except OSError as exc:
+            raise ActionError("Could not write to the log folder (is /state writable?).") from exc
+        for message_id, ts in pairs:
+            self._record("delete-row", message_id, ts)
+        return results
+
+    def delete_row(self, record: dict) -> str:
+        self.delete_rows([record])
+        return "Removed this row from the log."
+
     # ------------------------------------------------------------------ batch
 
     def batch(self, action: str, records: list) -> list:
         """Run one action on many records. Returns (record, ok, message) per record; one failure never stops the rest."""
         if action not in BATCH_ACTIONS:
             raise ActionError("Unknown action.")
+        if action == "delete-row":
+            return self.delete_rows(records)
         results, seen = [], set()
         for record in records:
             target = record.get("current_message_id") or ""

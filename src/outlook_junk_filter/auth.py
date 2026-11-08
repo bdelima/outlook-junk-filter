@@ -76,6 +76,12 @@ class Auth:
             error=str(reason).splitlines()[0][:300],
         )
 
+    def account_name(self) -> str:
+        """The signed-in mailbox address from the sign-in record (no extra Microsoft permission needed)."""
+        with self._lock:
+            accounts = self._app.get_accounts()
+        return str(accounts[0].get("username") or "") if accounts else ""
+
     def access_token(self) -> str:
         """For the Graph client: a fresh access token, refreshed silently when needed."""
         result = self.silent()

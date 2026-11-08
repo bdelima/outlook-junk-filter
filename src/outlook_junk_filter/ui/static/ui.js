@@ -14,7 +14,7 @@
       var chosen = boxes.filter(function (b) { return b.checked; });
       info.hidden = chosen.length === 0;
       if (count) count.textContent = chosen.length + " selected";
-      var totals = { teach: 0, restore: 0, allow: 0 };
+      var totals = { teach: 0, restore: 0, allow: 0, all: chosen.length };
       chosen.forEach(function (b) {
         if (b.dataset.t) totals.teach++;
         if (b.dataset.r) totals.restore++;

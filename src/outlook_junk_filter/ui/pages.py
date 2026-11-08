@@ -30,14 +30,34 @@ def link(path: str, params: dict, text: str) -> str:
 NAV = (("/", "Decisions"), ("/summary", "Summary"), ("/whatif", "What-if"))
 
 
+APP_NAME = "SpamWatch"
+ICON = (
+    '<svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" '
+    'stroke-linecap="round" aria-hidden="true"><path d="M12 2.5l8 3v5.5c0 5-3.4 8.7-8 10-4.6-1.3-8-5-8-10V5.5z"/>'
+    '<rect x="7.5" y="9" width="9" height="6.5" rx="1"/><path d="M7.5 10l4.5 3.2 4.5-3.2"/></svg>'
+)
+_brand = {"account": ""}
+
+
+def _account() -> str:
+    return esc(_brand["account"])
+
+
+def set_account(address: str) -> None:
+    """The mailbox this instance watches, shown under the name (one instance, one mailbox)."""
+    _brand["account"] = str(address or "")
+
+
 def layout(title: str, body: str, header: str = "", active: str = "") -> str:
     on = ' class="on"'
     tabs = "".join(f'<a href="{path}"{on if (active or "") == path else ""}>{label}</a>' for path, label in NAV)
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        f"<title>{esc(title)}</title><link rel=\"stylesheet\" href=\"/static/style.css\"></head><body>"
-        f"<nav><strong>outlook-junk-filter</strong>{tabs}{header}</nav>"
+        f"<title>{esc(title)} · {APP_NAME}</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/icon.svg\">"
+        "<link rel=\"stylesheet\" href=\"/static/style.css\"></head><body>"
+        f"<nav><span class=\"brand\">{ICON}<span><span class=\"name\">{APP_NAME}</span>"
+        f"<span class=\"mailbox\">{_account()}</span></span></span>{tabs}{header}</nav>"
         f"<main><h1>{esc(title)}</h1>{body}</main></body></html>"
     )
 
@@ -217,6 +237,7 @@ MENU = (
     ("restore-inbox", "Restore to Inbox", "restore"),
     ("allow-address", "Allowlist sender address", "allow"),
     ("allow-domain", "Allowlist sender domain", "allow"),
+    ("delete-row", "Delete from log\u2026", "all"),
 )
 
 
@@ -305,6 +326,9 @@ def _actions_block(record: dict, history=None) -> str:
         out.append('<p class="meta">Allowlist entries count only when SPF or DKIM passes. A done action stays clickable to repeat it.</p>')
     else:
         out.append("<p>This sender address cannot be allowlisted (it is not a plain address).</p>")
+    out.append(
+        '<p class="danger-zone">' + act("delete-row", "Delete this log row\u2026") + "</p>"
+    )
     return "".join(out)
 
 
@@ -315,6 +339,7 @@ ACTION_TEXT = {
     "restore-inbox": "Move this message to the Inbox (the job will keep it)",
     "allow-address": "Allowlist this sender address",
     "allow-domain": "Allowlist this sender's whole domain",
+    "delete-row": "Remove this row from the log (the email in Outlook is not touched; this can't be undone)",
 }
 
 
@@ -419,6 +444,7 @@ BATCH_TEXT = {
     "restore-inbox": "Restore to Inbox",
     "allow-address": "Allowlist sender address",
     "allow-domain": "Allowlist sender domain",
+    "delete-row": "Delete from log",
 }
 
 
@@ -431,7 +457,9 @@ def batch_page(records: list, missing: int, keys: list, token: str, info: dict, 
     for action, text in BATCH_TEXT.items():
         count = sum(1 for r in records if actions_module.eligible(action, r))
         if count:
-            css = ' class="primary"' if action == chosen else ""
+            css = (' class="danger"' if action == "delete-row" else ' class="primary"') if action == chosen else (
+                ' class="danger-text"' if action == "delete-row" else ""
+            )
             buttons.append(
                 f'<button type="submit" name="action" value="{esc(action)}"{css}>{esc(text)} ({count} of {len(records)})</button>'
             )
@@ -443,7 +471,12 @@ def batch_page(records: list, missing: int, keys: list, token: str, info: dict, 
     )
     note = f'<p class="error">{esc(missing)} selected row(s) are no longer in the log and are left out.</p>' if missing else ""
     lead = ""
-    if chosen in BATCH_TEXT:
+    if chosen == "delete-row":
+        lead = (
+            f"<p><strong>Remove {esc(len(records))} row(s) from the log?</strong> Only the history rows on this page. "
+            "The emails in Outlook and what the job has already decided are not touched. This can't be undone.</p>"
+        )
+    elif chosen in BATCH_TEXT:
         count = sum(1 for r in records if actions_module.eligible(chosen, r))
         lead = (
             f"<p><strong>{esc(BATCH_TEXT[chosen])}</strong> applies to {esc(count)} of {esc(len(records))} selected message(s). "

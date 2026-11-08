@@ -7,18 +7,22 @@ token and, when the browser sends an Origin, must come from the page's own host.
 from __future__ import annotations
 
 import hmac
+import json
 import secrets
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import history, logreader, pages
+from ..status import read_status
+from . import history, logreader, pages, stats
 from .actions import BATCH_ACTIONS, ActionError
 from .rules import default_rules
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 4096
+STATS_TTL = 30
 MAX_BATCH_BODY = 256 * 1024
 MAX_BATCH = logreader.PER_PAGE * 2  # a page is 100 rows; allow some slack
 CSP = (
@@ -51,6 +55,11 @@ class Context:
         self.actions = actions  # None when the page runs without the job (actions are unavailable)
         self.csrf = csrf  # check the form token and the Origin on actions (OJF_UI_CSRF)
         self.token = secrets.token_urlsafe(32)
+        self.stats_cache = (0.0, None)  # (when, data): Homepage polls, so recount at most every STATS_TTL seconds
+
+    @property
+    def state_dir(self) -> Path:
+        return self.log_dir.parent
 
 
 def make_handler(ctx: Context):
@@ -88,7 +97,11 @@ def make_handler(ctx: Context):
 
         # ------------------------------------------------------------ GET
 
+        def _brand(self):
+            pages.set_account(read_status(ctx.state_dir).get("account", ""))
+
         def do_GET(self):  # noqa: N802
+            self._brand()
             path = urlsplit(self.path).path
             params = self._params()
             try:
@@ -106,6 +119,10 @@ def make_handler(ctx: Context):
                     self._confirm(params)
                 elif path == "/static/style.css":
                     self._send(200, (STATIC / "style.css").read_bytes(), "text/css; charset=utf-8")
+                elif path == "/api/stats":
+                    self._stats()
+                elif path == "/static/icon.svg":
+                    self._send(200, (STATIC / "icon.svg").read_bytes(), "image/svg+xml")
                 elif path == "/static/ui.js":
                     self._send(200, (STATIC / "ui.js").read_bytes(), "text/javascript; charset=utf-8")
                 else:
@@ -164,6 +181,14 @@ def make_handler(ctx: Context):
                 self.wfile.write(chunk.encode("utf-8"))
             self.close_connection = True
 
+        def _stats(self):
+            now = time.monotonic()
+            when, data = ctx.stats_cache
+            if data is None or now - when > STATS_TTL:
+                data = stats.compute(ctx.log_dir)
+                ctx.stats_cache = (now, data)
+            self._send(200, json.dumps(data).encode("utf-8"), "application/json; charset=utf-8")
+
         def _confirm(self, params):
             action = params.get("action", "")
             record = self._record(params)
@@ -175,6 +200,7 @@ def make_handler(ctx: Context):
         # ------------------------------------------------------------ POST
 
         def do_POST(self):  # noqa: N802
+            self._brand()
             path = urlsplit(self.path).path
             if path not in ("/act", "/batch"):
                 self._html(pages.layout("Not found", "<p>No such page.</p>"), 404)
@@ -233,11 +259,15 @@ def make_handler(ctx: Context):
             except ActionError as exc:
                 self._html(pages.result_page(str(exc), False, back, info), 400)
                 return
+            if action == "delete-row":
+                ctx.stats_cache = (0.0, None)
             self._html(pages.batch_result_page(action, results, missing, info))
 
         def _act(self, form):
             info = logreader.header(ctx.log_dir)
             back = pages.link("/message", {"id": form.get("id", ""), "ts": form.get("ts", "")}, "Back to the message")
+            if form.get("action") == "delete-row":
+                back = pages.link("/", {}, "Back to the decisions")
             record = logreader.find(ctx.log_dir, form.get("id", ""), form.get("ts", ""))
             if record is None:
                 self._html(pages.result_page("That record is not in the log.", False, back, info), 404)
@@ -257,6 +287,9 @@ def make_handler(ctx: Context):
                     message = ctx.actions.restore(record, "inbox")
                 elif action == "allow-address":
                     message = ctx.actions.allowlist("address", record.get("from_addr", ""), record.get("current_message_id") or "")
+                elif action == "delete-row":
+                    message = ctx.actions.delete_row(record)
+                    ctx.stats_cache = (0.0, None)
                 elif action == "allow-domain":
                     message = ctx.actions.allowlist("domain", record.get("from_addr", ""), record.get("current_message_id") or "")
                 else:

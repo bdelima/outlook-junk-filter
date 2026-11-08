@@ -58,6 +58,7 @@ Add a stack with [`docker-compose.example.yml`](docker-compose.example.yml). The
 | `OJF_QUARANTINE_FOLDER` | no | `Quarantined` | Name of the top-level folder flagged messages are moved to. Any name works, except a system folder such as Junk or Inbox. Created if missing; an existing folder of that name is reused. |
 | `OJF_QUARANTINE_THRESHOLD` | no | none | Score at or above which a message is moved to the folder. Must be lower than `OJF_DELETE_THRESHOLD` when both are set. With only this set, nothing is deleted at score time. |
 | `OJF_QUARANTINE_RETENTION_DAYS` | no | `7` | Days a message stays in the folder before the job deletes it. The age counts from the message's received time, so one already older than this is deleted on the next pass. |
+| `OJF_LOG_RETENTION_DAYS` | no | `30` | Days of decision history kept. Older rows are pruned daily; `0` keeps everything. |
 | `OJF_UI_PORT` | no | `60888` | Port of the review page (the stack publishes it). |
 | `OJF_UI_CSRF` | no | `off` | `on` makes the review page's actions require a per-process form token and refuse a request whose `Origin` is not the page's own host (the proxy must then pass `Host` through unchanged). Off by default: the page has no login and is meant for a private LAN. |
 | `OJF_MS_SCL_POINTS` | no | `7=1.5,8=3,9=4` | Points added to the score from Microsoft's own spam verdict, the `X-MS-Exchange-Organization-SCL` header (0-9; 5-6 spam, 7-9 high-confidence spam). A message Microsoft rates 8 gets +3 on top of SpamAssassin's score and is logged with the rule `OJF_MS_SCL_8`. `off` disables it. |
@@ -148,6 +149,30 @@ shows, because senders and subjects come from phishing mail.
   message page lists every rule with its description and the original rule name.
 - **Layout:** sort by clicking a column heading; drag a column edge to resize it (double-click resets; widths are kept
   in this browser). The batch actions menu also offers *Allowlist sender address* and *domain*.
+- **Delete from log** (batch menu, or on the message page): removes history rows from the review page only. Nothing
+  in Outlook changes and the job keeps what it already decided. The rows disappear at once and are removed from the
+  files by the next prune.
+- **Log pruning:** once a day (and at startup) the job drops decision rows older than `OJF_LOG_RETENTION_DAYS`
+  (default 30; `0` keeps them), rows you deleted, and teach, restore and delete records of that age. Allowlist
+  records are kept so a sender's chip stays. One line in the container log says what was removed.
+- **Stats API for Homepage:** `GET /api/stats` on the review port returns JSON with counts only (no senders or
+  subjects): `app`, `version`, `account`, `mode`, `healthy`, `last_scan_seconds_ago`, `today` and `last_7_days` (`scored`,
+  `kept`, `quarantined`, `deleted`, `errors`, `ai_rated`) and `log_records`. "Today" is the container's local day (`TZ`).
+  Like the rest of the page it has no login. Results are cached for 30 seconds. A Homepage entry:
+
+  ```yaml
+  - SpamWatch:
+      icon: http://HOST:60888/static/icon.svg
+      href: http://HOST:60888
+      widget:
+        type: customapi
+        url: http://HOST:60888/api/stats
+        mappings:
+          - { field: { today: kept }, label: Kept today }
+          - { field: { today: quarantined }, label: Quarantined }
+          - { field: { today: deleted }, label: Deleted }
+          - { field: last_scan_seconds_ago, label: Last scan, format: duration }
+  ```
 - **Auto-learn:** SpamAssassin's own `bayes_auto_learn` is on by default (`config/local.cf.example` carries the line, and
   `0` turns it off). Manual teaching works either way and corrects what auto-learn gets wrong.
 

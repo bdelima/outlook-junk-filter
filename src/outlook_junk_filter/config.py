@@ -24,6 +24,7 @@ DEFAULT_KEEP_PATTERN = r"^USER_IN_.*(WHITE|WELCOME)LIST"
 DEFAULT_QUARANTINE_FOLDER = "Quarantined"
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_UI_PORT = 60888
+DEFAULT_LOG_RETENTION_DAYS = 30
 DEFAULT_AI_MODEL = "OpenVINO/Qwen3-8B-int4-cw-ov"
 DEFAULT_AI_POINTS = 4.0
 DEFAULT_AI_TIMEOUT = 60
@@ -89,6 +90,7 @@ class Config:
     quarantine_retention_days: int = DEFAULT_RETENTION_DAYS
     ui_port: int = DEFAULT_UI_PORT
     ui_csrf: bool = False
+    log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS  # 0 keeps the decision log forever
     scl_points: dict = field(default_factory=lambda: dict(DEFAULT_SCL_POINTS))  # SCL value -> points; empty = off
     ai_url: str | None = None  # base URL of an OpenAI-compatible chat server; None = AI scoring off
     ai_model: str = DEFAULT_AI_MODEL
@@ -143,6 +145,7 @@ class Config:
             "quarantine_retention_days": self.quarantine_retention_days,
             "ui_port": self.ui_port,
             "ui_csrf": self.ui_csrf,
+            "log_retention_days": self.log_retention_days,
             "ms_scl_points": self.scl_points,
             "ai_url": self.ai_url,
             "ai_model": self.ai_model if self.ai_url else None,
@@ -206,6 +209,19 @@ def load(env=None) -> Config:
                 f"OJF_QUARANTINE_RETENTION_DAYS={raw!r} is not a whole number >= 0; using {DEFAULT_RETENTION_DAYS}"
             )
             retention = DEFAULT_RETENTION_DAYS
+
+    log_retention = DEFAULT_LOG_RETENTION_DAYS
+    raw = _get(env, "OJF_LOG_RETENTION_DAYS")
+    if raw is not None:
+        try:
+            log_retention = int(raw)
+            if log_retention < 0:
+                raise ValueError
+        except ValueError:
+            problems.append(
+                f"OJF_LOG_RETENTION_DAYS={raw!r} is not a whole number >= 0; using {DEFAULT_LOG_RETENTION_DAYS}"
+            )
+            log_retention = DEFAULT_LOG_RETENTION_DAYS
 
     ui_port = DEFAULT_UI_PORT
     raw = _get(env, "OJF_UI_PORT")
@@ -338,6 +354,7 @@ def load(env=None) -> Config:
         quarantine_retention_days=retention,
         ui_port=ui_port,
         ui_csrf=ui_csrf,
+        log_retention_days=log_retention,
         scl_points=scl_points,
         ai_url=ai_url,
         ai_model=ai_model,
