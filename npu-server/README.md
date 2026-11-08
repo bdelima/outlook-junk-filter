@@ -25,7 +25,8 @@ The image is published as `bdelima/ovms-npu:<version>` (amd64). Pin a version ta
    docker run --rm -u $(id -u):$(id -g) -v $(pwd)/models:/models:rw bdelima/ovms-npu:1.0.0 --add_to_config --config_path /models/config.json --model_name OpenVINO/Qwen3-8B-int4-cw-ov --model_path /models/OpenVINO/Qwen3-8B-int4-cw-ov
    ```
 
-2. Run it with `docker-compose.example.yml` (set `RENDER_GID` to `stat -c %g /dev/dri/render*`).
+2. Run it with `docker-compose.example.yml`: set `PUID` and `PGID` to the user that owns the models folder, `MODELS_DIR` to that
+   folder, and `RENDER_GID` to the output of `stat -c %g /dev/dri/render*`.
 
 3. Test:
 

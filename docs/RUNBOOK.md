@@ -80,7 +80,8 @@ A warning like *the first delta walk returned X messages but the Junk folder hol
 3. Confirm the trust path (see the README's *Roll it out safely*): `auth_results_present` is true and `first_untrusted_ip` is the
    real sender's. Set `trusted_networks` in `local.cf` only from your own samples.
 4. Pick thresholds with almost nothing wanted above them. SpamAssassin's default spam mark is 5.0; its documentation advises
-   automatic deletion only at much higher scores. Start by **quarantining** (gentlest), delete later.
+   automatic deletion only at much higher scores. Start by **quarantining** (gentlest), delete later. Thresholds apply to the
+   total score shown in the log: SpamAssassin's score plus any Microsoft SCL points, shipped-rule points and AI points.
 5. Set, in Portainer: `OJF_DELETE_MODE=deleted-items` (recoverable), `OJF_QUARANTINE_THRESHOLD`, optionally
    `OJF_DELETE_THRESHOLD` (higher), then `OJF_MODE=act`. Update the stack.
 6. Check the quarantine folder in Outlook by hand for the first days. Wrongly flagged messages: **Restore** from the review page
@@ -207,7 +208,14 @@ One container per mailbox. Everything per-mailbox is separate: token, state, Bay
          - OJF_LOG_RETENTION_DAYS=${OJF_LOG_RETENTION_DAYS}
          - OJF_UI_PORT=${OJF2_UI_PORT:-60889}
          - OJF_UI_CSRF=${OJF_UI_CSRF}
+         - OJF_MS_SCL_POINTS=${OJF_MS_SCL_POINTS}
          - OJF_AI_URL=${OJF_AI_URL}
+         - OJF_AI_MODEL=${OJF_AI_MODEL}
+         - OJF_AI_MIN_SCORE=${OJF_AI_MIN_SCORE}
+         - OJF_AI_MAX_SCORE=${OJF_AI_MAX_SCORE}
+         - OJF_AI_MAX_POINTS=${OJF_AI_MAX_POINTS}
+         - OJF_AI_TIMEOUT_SECONDS=${OJF_AI_TIMEOUT_SECONDS}
+         - OJF_KEEP_RULE_PATTERN=${OJF_KEEP_RULE_PATTERN}
        ports:
          - "${OJF2_UI_PORT:-60889}:${OJF2_UI_PORT:-60889}"
        volumes:
@@ -257,8 +265,10 @@ the mailbox on its next pass.
 
 Back up `/opt/outlook-junk-filter/config` (your rules and allowlist) and, if you want to keep learning, `state/bayes`. The token
 (`state/tokens/token.json`) is a key to the mailbox: back it up like a secret and never commit it; without it you simply sign in
-again. Logs and `state/delta/state.json` are disposable (a lost delta file means the whole Junk folder is walked once and
-already-quarantined mail is not rescored because it is no longer in Junk).
+again. Logs and `state/delta/state.json` are disposable, but a lost delta file means the whole Junk folder is walked and scored
+again from scratch: in `act` mode that acts on everything still in Junk (messages you restored are kept because of
+`state/restored.json`), and each message gets a second row in the log. Mail already quarantined or deleted is no longer in Junk,
+so it is not touched. Deleting the delta file with the stack stopped is also how you force a full re-scan on purpose.
 
 To restore: recreate the folders (step 1), copy the files back with ownership 1000:1000, start the stack.
 
