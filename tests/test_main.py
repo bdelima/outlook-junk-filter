@@ -150,6 +150,37 @@ def test_authority_and_scope_are_the_consumers_ones():
     assert auth_module.SCOPES == ["Mail.ReadWrite", "MailboxSettings.ReadWrite"]
 
 
+def test_a_saved_sign_in_that_does_not_cover_the_scopes_starts_a_new_sign_in(tmp_path, caplog):
+    """MSAL returns None (not an error dict) when the cached token lacks a newly added scope."""
+
+    class FakeMsal:
+        def get_accounts(self):
+            return [{"home_account_id": "x"}]
+
+        def acquire_token_silent(self, scopes, account):
+            return None
+
+    a = make_auth(tmp_path, logging.getLogger("ojf-auth"), {}, None)
+    a._app = FakeMsal()
+    result = a.silent()
+    assert result.token is None and result.needs_signin is True
+    assert "new sign-in is required" in caplog.text
+
+
+def test_a_network_failure_during_refresh_is_not_a_new_sign_in(tmp_path):
+    class FakeMsal:
+        def get_accounts(self):
+            return [{"home_account_id": "x"}]
+
+        def acquire_token_silent(self, scopes, account):
+            raise ConnectionError("down")
+
+    a = make_auth(tmp_path, logging.getLogger("ojf-auth"), {}, None)
+    a._app = FakeMsal()
+    result = a.silent()
+    assert result.needs_signin is False and "ConnectionError" in result.error
+
+
 @pytest.mark.parametrize("error,renews", [("invalid_grant", True), ("interaction_required", True), ("temporarily_unavailable", False)])
 def test_failed_refresh_starts_a_new_sign_in_only_when_the_token_is_dead(tmp_path, error, renews):
     class FakeMsal:

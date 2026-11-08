@@ -1,7 +1,7 @@
 # SpamWatch design
 
 SpamWatch is the product name; the repository, image and environment variables keep the name `outlook-junk-filter` (`OJF_*`).
-This document describes what is built as of **0.13.0**, how the parts fit together, and why they are built that way. For
+This document describes what is built as of **0.13.1**, how the parts fit together, and why they are built that way. For
 deploying and operating it, see the [runbook](RUNBOOK.md). For settings, see the [README](../README.md).
 
 ## Purpose and limits
@@ -372,6 +372,7 @@ healthy), and refreshes silently afterwards. A refresh failure that means the to
 | 0.11.0 | SpamWatch header, icon and mailbox; delete rows; log pruning; stats API |
 | 0.12.0 | Delete all matching rows; batch actions return to the filtered view |
 | 0.13.0 | Outlook category hooks (train and manage from inside Outlook); `Deleted ✓` on messages the job deletes; new scope `MailboxSettings.ReadWrite` (each mailbox signs in again) |
+| 0.13.1 | A saved sign-in that does not cover a newly added scope (MSAL returns `None`) now starts the device-code sign-in instead of looping on `token refresh failed` |
 
 ## Not built
 

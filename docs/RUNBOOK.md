@@ -130,7 +130,7 @@ Category hooks are on from 0.13.0 with no setting. **Upgrading from 0.12.x needs
 
 1. In Microsoft's app registration portal add the delegated permission **`MailboxSettings.ReadWrite`** to the app (Bob's and the
    second instance use the same registration if you registered one).
-2. After the image is pulled, watch the logs for `SIGN-IN NEEDED: open ... enter code ...` and sign in again (the old token does not
+2. After the image is pulled (0.13.1 or later; 0.13.0 loops on `token refresh failed: no token returned` instead of asking), watch the logs for `SIGN-IN NEEDED: open ... enter code ...` and sign in again (the old token does not
    have the new scope). Each mailbox signs in separately.
 
 The job then creates 13 categories in the mailbox (`Spam`, `Not Spam`, `Allow Sender`, `Allow Domain`, `Restore to Junk`, a green
