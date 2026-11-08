@@ -70,6 +70,12 @@ class Auth:
         self._save()
         if result and "access_token" in result:
             return SilentResult(token=result["access_token"])
+        if result is None:
+            # MSAL returns None, not an error, when the cached account has no refresh token that covers SCOPES
+            # (for example after a scope was added in an upgrade). A network failure raises instead, so this is a
+            # cached sign-in that cannot serve these scopes: only a new sign-in fixes it.
+            self._log.warning("The saved sign-in does not cover the permissions this version needs; a new sign-in is required")
+            return SilentResult(needs_signin=True, error="the saved sign-in does not cover the required permissions")
         result = result or {}
         reason = result.get("error_description") or result.get("error") or "no token returned"
         return SilentResult(
