@@ -37,7 +37,7 @@ deleted until you have reviewed the scores and switched to `act`.
   Restore a wrongly flagged message by moving it back in Outlook. There is no per-run cap on deletions or moves.
 - **Extra evidence beyond SpamAssassin.** Microsoft's own spam verdict (the SCL header) adds points through
   `OJF_MS_SCL_POINTS`; a few shipped rules catch campaigns the stock rules miss; and, if you set `OJF_AI_URL`, a local
-  language model rates the ambiguous middle. See [AI scoring](#ai-scoring) and [Extra rules](#extra-rules-shipped-in-the-image).
+  language model rates the ambiguous middle. These points are added to SpamAssassin's score, and the thresholds compare the total. See [AI scoring](#ai-scoring) and [Extra rules](#extra-rules-shipped-in-the-image).
 - Any error fetching, scoring or acting on a message keeps it. Invalid settings never cause deletion.
 - The delta link is saved only after every message in the pass is handled or on the retry list, so a crash replays
   the pass instead of skipping mail.
@@ -67,10 +67,10 @@ Add a stack with [`docker-compose.example.yml`](docker-compose.example.yml). The
 | `OJF_INTERVAL_SECONDS` | no | `900` | Seconds between runs. Values below 60 are raised to 60 and logged. |
 | `OJF_MODE` | no | `report-only` | `report-only` or `act`. |
 | `OJF_DELETE_MODE` | when `OJF_MODE` is `act` | none | `deleted-items` (recoverable in Outlook) or `permanent` (not recoverable). Neither is a default. Also used when quarantined messages expire. |
-| `OJF_DELETE_THRESHOLD` | when a mode is `act`, unless `OJF_QUARANTINE_THRESHOLD` is set | none | SpamAssassin score, as a decimal, at or above which a message is deleted. |
+| `OJF_DELETE_THRESHOLD` | when `OJF_MODE` is `act`, unless `OJF_QUARANTINE_THRESHOLD` is set | none | Total score, as a decimal, at or above which a message is deleted. The total is SpamAssassin's score plus any Microsoft SCL points, shipped-rule points and AI points. |
 | `OJF_QUARANTINE_ENABLED` | no | `on` | `on` or `off`. Turns the quarantine feature on or off. |
 | `OJF_QUARANTINE_FOLDER` | no | `Quarantined` | Name of the top-level folder flagged messages are moved to. Any name works, except a system folder such as Junk or Inbox. Created if missing; an existing folder of that name is reused. |
-| `OJF_QUARANTINE_THRESHOLD` | no | none | Score at or above which a message is moved to the folder. Must be lower than `OJF_DELETE_THRESHOLD` when both are set. With only this set, nothing is deleted at score time. |
+| `OJF_QUARANTINE_THRESHOLD` | no | none | Total score (as for `OJF_DELETE_THRESHOLD`) at or above which a message is moved to the folder. Must be lower than `OJF_DELETE_THRESHOLD` when both are set. With only this set, nothing is deleted at score time. |
 | `OJF_QUARANTINE_RETENTION_DAYS` | no | `7` | Days a message stays in the folder before the job deletes it. The age counts from the message's received time, so one already older than this is deleted on the next pass. |
 | `OJF_LOG_RETENTION_DAYS` | no | `30` | Days of decision history kept. Older rows are pruned daily; `0` keeps everything. |
 | `OJF_UI_PORT` | no | `60888` | Port of the review page (the stack publishes it). |
@@ -121,6 +121,7 @@ a code expires first, the job logs that and issues a fresh one.
 | `/state/status.json` | Mailbox address, version, mode and last scan time, kept by the job for the page header and `/api/stats` |
 | `/state/restored.json` | Messages restored from the review page; the job keeps them (reason `restored`) |
 | `/state/health` | Touched by the job; the container health check reads it |
+| `/state/home`, `/state/tmp` | `HOME` and `TMPDIR` for SpamAssassin and `sa-learn` (the container has no home directory) |
 
 The container runs as uid/gid 1000 with no home directory and works with a read-only root filesystem (only `/state`
 and `/config` are written; the job itself never writes to `/config`, only the review page's allowlist action does). It needs outbound HTTPS to `graph.microsoft.com` and `login.microsoftonline.com`, plus DNS.

@@ -66,6 +66,7 @@ error and carries on. `python -m outlook_junk_filter.ui` serves the page alone, 
 | `logs.py` | Container log, `decisions.jsonl` (rotating), tombstones, pruning |
 | `status.py` | `/state/status.json`: account, version, mode, last scan time |
 | `healthcheck.py` | Container health: `/state/health` touched recently enough |
+| `selfcheck.py` | Used by the image tests only: runs the job's own SpamAssassin lint and scoring code against a config |
 | `ui/server.py` | HTTP routes, security headers, token and Origin checks |
 | `ui/pages.py` | All HTML (everything from the log is escaped) |
 | `ui/logreader.py` | Reads the logs: filter, sort, page, find, summary, what-if; hides deleted rows |
